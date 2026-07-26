@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { FileDown, Calendar as CalendarIcon, Printer } from 'lucide-react';
+import { FileDown, Calendar as CalendarIcon } from 'lucide-react';
 // Run: npm install jspdf jspdf-autotable
 
 export default function ReportsPage() {

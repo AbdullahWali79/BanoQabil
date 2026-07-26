@@ -1,19 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Plus, Edit, Trash2, GraduationCap } from 'lucide-react';
+import { Search, Edit, GraduationCap } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 
 export default function ManageStudentsPage() {
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [showModal, setShowModal] = useState(false);
 
   const fetchStudents = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('students')
       .select('id, father_name, application_id, enrollment_date, profiles!inner(id, full_name, email, phone, status), batches(id, name)');
     

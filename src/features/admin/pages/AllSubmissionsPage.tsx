@@ -1,7 +1,6 @@
-import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Search, ExternalLink, Youtube, FileText } from 'lucide-react';
+import { Search, FileText } from 'lucide-react';
 
 export default function AllSubmissionsPage() {
   return (
