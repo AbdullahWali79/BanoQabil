@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Shield, CheckCircle, XCircle, Settings2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Shield, CheckCircle, XCircle, Settings2, Key } from 'lucide-react';
 
 type Admin = {
   id: string;
@@ -27,9 +28,17 @@ const PERMISSION_KEYS: { key: string; label: string }[] = [
 export default function ManageAdminsPage() {
   const [admins, setAdmins] = useState<Admin[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Permissions Modal State
   const [selectedAdmin, setSelectedAdmin] = useState<Admin | null>(null);
   const [perms, setPerms] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
+  
+  // Reset Password Modal State
+  const [resetPasswordAdmin, setResetPasswordAdmin] = useState<Admin | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [resetting, setResetting] = useState(false);
+
   const [toast, setToast] = useState('');
 
   const fetchAdmins = async () => {
@@ -66,6 +75,27 @@ export default function ManageAdminsPage() {
       setTimeout(() => setToast(''), 3000);
     }
     setSaving(false);
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetPasswordAdmin || newPassword.length < 6) return;
+    setResetting(true);
+    
+    // Call the secure Postgres RPC function to update the user's password directly
+    const { error } = await supabase.rpc('update_user_password', {
+      user_id: resetPasswordAdmin.id,
+      new_password: newPassword
+    });
+
+    if (!error) {
+      setToast(`✅ Password reset successfully for ${resetPasswordAdmin.full_name}`);
+      setResetPasswordAdmin(null);
+      setNewPassword('');
+      setTimeout(() => setToast(''), 3000);
+    } else {
+      alert(`Error resetting password: ${error.message}`);
+    }
+    setResetting(false);
   };
 
   const toggleStatus = async (admin: Admin) => {
@@ -159,6 +189,9 @@ export default function ManageAdminsPage() {
                             <Button size="sm" variant="outline" onClick={() => openPerms(admin)} className="gap-1.5">
                               <Settings2 size={14} /> Permissions
                             </Button>
+                            <Button size="sm" variant="outline" onClick={() => setResetPasswordAdmin(admin)} className="gap-1.5">
+                              <Key size={14} /> Reset Password
+                            </Button>
                             <Button
                               size="sm"
                               variant={admin.status === 'Approved' ? 'destructive' : 'default'}
@@ -206,6 +239,42 @@ export default function ManageAdminsPage() {
                 {saving ? 'Saving...' : 'Save Permissions'}
               </Button>
               <Button variant="outline" onClick={() => setSelectedAdmin(null)} className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Password Modal */}
+      {resetPasswordAdmin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-background rounded-2xl shadow-2xl w-full max-w-md border">
+            <div className="p-6 border-b">
+              <h2 className="text-xl font-bold">Reset Password</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Setting a new password for <strong>{resetPasswordAdmin.full_name}</strong>
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">New Password</label>
+                <Input 
+                  type="password" 
+                  placeholder="Min 6 characters" 
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="p-6 border-t flex gap-3">
+              <Button onClick={handleResetPassword} disabled={resetting || newPassword.length < 6} className="flex-1">
+                {resetting ? 'Resetting...' : 'Confirm Reset'}
+              </Button>
+              <Button variant="outline" onClick={() => {
+                setResetPasswordAdmin(null);
+                setNewPassword('');
+              }} className="flex-1">
                 Cancel
               </Button>
             </div>
