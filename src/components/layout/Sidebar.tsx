@@ -14,7 +14,7 @@ export function Sidebar() {
 
   const getLinks = () => {
     const baseLinks = [
-      { to: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard' }
+      { to: '/dashboard', icon: <LayoutDashboard size={20} />, label: 'Dashboard' }
     ];
 
     if (role === 'Super Admin' || role === 'Admin') {

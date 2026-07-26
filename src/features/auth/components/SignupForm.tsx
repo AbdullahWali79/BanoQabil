@@ -19,7 +19,7 @@ const signupSchema = z.object({
   fullName: z.string().min(3, { message: 'Name must be at least 3 characters' }),
   email: z.string().email({ message: 'Invalid email address' }),
   password: z.string().min(6, { message: 'Password must be at least 6 characters' }),
-  role: z.enum(['Teacher', 'Student']),
+  role: z.enum(['Admin', 'Teacher', 'Student']),
 });
 
 type SignupFormValues = z.infer<typeof signupSchema>;
@@ -176,6 +176,16 @@ export function SignupForm() {
                       className="w-4 h-4 text-primary"
                     />
                     <span>Teacher</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      value="Admin" 
+                      checked={field.value === 'Admin'}
+                      onChange={field.onChange}
+                      className="w-4 h-4 text-primary"
+                    />
+                    <span>Admin</span>
                   </label>
                 </div>
                 <FormMessage />

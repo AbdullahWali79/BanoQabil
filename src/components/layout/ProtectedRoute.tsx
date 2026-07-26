@@ -31,7 +31,7 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
 
   // If user is approved and trying to access /pending, redirect to dashboard
   if (status !== 'Pending' && location.pathname === '/pending') {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   if (allowedRoles && role && !allowedRoles.includes(role)) {

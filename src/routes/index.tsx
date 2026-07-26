@@ -4,6 +4,7 @@ import { SignupPage } from '@/features/auth/pages/SignupPage';
 import { PendingApprovalPage } from '@/features/auth/pages/PendingApprovalPage';
 import { ProtectedRoute } from '@/components/layout/ProtectedRoute';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { LandingPage } from '@/pages/LandingPage';
 
 // Simple placeholder components for now
 const Dashboard = () => <div><h1 className="text-3xl font-bold">Dashboard</h1><p className="text-muted-foreground mt-2">Welcome back to your portal.</p></div>;
@@ -11,6 +12,10 @@ const Approvals = () => <div><h1 className="text-3xl font-bold">Pending Approval
 const Unauthorized = () => <div className="p-8 text-center text-destructive"><h1>403 - Unauthorized</h1></div>;
 
 const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <LandingPage />,
+  },
   {
     path: "/login",
     element: <LoginPage />,
@@ -28,7 +33,7 @@ const router = createBrowserRouter([
     ),
   },
   {
-    path: "/",
+    path: "/dashboard",
     element: (
       <ProtectedRoute>
         <AppLayout />
