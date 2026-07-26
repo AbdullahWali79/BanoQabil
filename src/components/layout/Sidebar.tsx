@@ -19,28 +19,28 @@ export function Sidebar() {
 
     if (role === 'Super Admin' || role === 'Admin') {
       baseLinks.push(
-        { to: '/approvals', icon: <UserCheck size={20} />, label: 'Pending Approvals' },
-        { to: '/users', icon: <Users size={20} />, label: 'Manage Users' },
-        { to: '/courses', icon: <BookOpen size={20} />, label: 'Courses & Batches' }
+        { to: '/dashboard/approvals', icon: <UserCheck size={20} />, label: 'Pending Approvals' },
+        { to: '/dashboard/users', icon: <Users size={20} />, label: 'Manage Users' },
+        { to: '/dashboard/courses', icon: <BookOpen size={20} />, label: 'Courses & Batches' }
       );
     }
 
     if (role === 'Teacher') {
       baseLinks.push(
-        { to: '/my-classes', icon: <Users size={20} />, label: 'My Classes' },
-        { to: '/assignments', icon: <BookOpen size={20} />, label: 'Assignments' },
-        { to: '/attendance', icon: <ClipboardCheck size={20} />, label: 'Attendance' }
+        { to: '/dashboard/my-classes', icon: <Users size={20} />, label: 'My Classes' },
+        { to: '/dashboard/assignments', icon: <BookOpen size={20} />, label: 'Assignments' },
+        { to: '/dashboard/attendance', icon: <ClipboardCheck size={20} />, label: 'Attendance' }
       );
     }
 
     if (role === 'Student') {
       baseLinks.push(
-        { to: '/my-assignments', icon: <BookOpen size={20} />, label: 'My Assignments' },
-        { to: '/my-attendance', icon: <ClipboardCheck size={20} />, label: 'My Attendance' }
+        { to: '/dashboard/my-assignments', icon: <BookOpen size={20} />, label: 'My Assignments' },
+        { to: '/dashboard/my-attendance', icon: <ClipboardCheck size={20} />, label: 'My Attendance' }
       );
     }
 
-    baseLinks.push({ to: '/settings', icon: <Settings size={20} />, label: 'Settings' });
+    baseLinks.push({ to: '/dashboard/settings', icon: <Settings size={20} />, label: 'Settings' });
 
     return baseLinks;
   };
