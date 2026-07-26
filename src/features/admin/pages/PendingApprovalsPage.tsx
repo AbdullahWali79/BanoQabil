@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { UserCheck, UserX, ShieldCheck, Mail, Calendar } from 'lucide-react';
-import { useAuthStore } from '@/store/authStore';
 
 type PendingUser = {
   id: string;
