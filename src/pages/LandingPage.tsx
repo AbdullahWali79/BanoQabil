@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
-import { ArrowRight, BookOpen, Users, Award, ShieldCheck, GraduationCap } from 'lucide-react';
+import { ArrowRight, BookOpen, Users, ShieldCheck, GraduationCap } from 'lucide-react';
 
 export function LandingPage() {
   return (
