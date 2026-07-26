@@ -52,7 +52,7 @@ export function LoginForm() {
     }
 
     // On successful login, the auth state listener in App will handle redirection based on role
-    navigate('/');
+    navigate('/dashboard');
   }
 
   return (
