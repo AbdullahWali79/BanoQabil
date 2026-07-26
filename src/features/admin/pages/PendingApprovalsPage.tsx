@@ -17,7 +17,7 @@ export function PendingApprovalsPage() {
 
   const fetchPendingUsers = async () => {
     setIsLoading(true);
-    // Join with roles table to get role name
+    // Use LEFT join (no !inner) so users without a role_id still appear
     const { data, error } = await supabase
       .from('profiles')
       .select(`
@@ -25,18 +25,17 @@ export function PendingApprovalsPage() {
         full_name,
         email,
         created_at,
-        roles!inner(name)
+        roles(name)
       `)
       .eq('status', 'Pending')
       .order('created_at', { ascending: false });
 
     if (!error && data) {
-      // Map data to our type
       const mappedData = data.map((d: any) => ({
         id: d.id,
-        full_name: d.full_name,
+        full_name: d.full_name || 'Unknown User',
         email: d.email,
-        role: d.roles.name,
+        role: d.roles?.name || 'Unknown',
         created_at: new Date(d.created_at).toLocaleDateString(),
       }));
       setUsers(mappedData);
