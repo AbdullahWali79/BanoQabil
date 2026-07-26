@@ -8,7 +8,6 @@ import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function SettingsPage() {
   const { user } = useAuthStore();
-  const [profile, setProfile] = useState<any>({});
   
   // Profile form state
   const [fullName, setFullName] = useState('');
@@ -27,7 +26,6 @@ export default function SettingsPage() {
       supabase.from('profiles').select('*').eq('id', user.id).single()
         .then(({ data }) => { 
           if (data) {
-            setProfile(data);
             setFullName(data.full_name || '');
             setPhone(data.phone || '');
             setAddress(data.address || '');
