@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Shield, CheckCircle, XCircle, Settings2, Key } from 'lucide-react';
+import { Shield, CheckCircle, XCircle, Settings2, Key, Trash2 } from 'lucide-react';
 
 type Admin = {
   id: string;
@@ -38,6 +38,10 @@ export default function ManageAdminsPage() {
   const [resetPasswordAdmin, setResetPasswordAdmin] = useState<Admin | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [resetting, setResetting] = useState(false);
+
+  // Delete Modal State
+  const [deleteAdmin, setDeleteAdmin] = useState<Admin | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [toast, setToast] = useState('');
 
@@ -81,7 +85,6 @@ export default function ManageAdminsPage() {
     if (!resetPasswordAdmin || newPassword.length < 6) return;
     setResetting(true);
     
-    // Call the secure Postgres RPC function to update the user's password directly
     const { error } = await supabase.rpc('update_user_password', {
       user_id: resetPasswordAdmin.id,
       new_password: newPassword
@@ -96,6 +99,25 @@ export default function ManageAdminsPage() {
       alert(`Error resetting password: ${error.message}`);
     }
     setResetting(false);
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteAdmin) return;
+    setDeleting(true);
+    
+    const { error } = await supabase.rpc('delete_user', {
+      user_id: deleteAdmin.id
+    });
+
+    if (!error) {
+      setToast(`🗑️ ${deleteAdmin.full_name} has been deleted permanently.`);
+      setAdmins(prev => prev.filter(a => a.id !== deleteAdmin.id));
+      setDeleteAdmin(null);
+      setTimeout(() => setToast(''), 3000);
+    } else {
+      alert(`Error deleting user: ${error.message}`);
+    }
+    setDeleting(false);
   };
 
   const toggleStatus = async (admin: Admin) => {
@@ -127,7 +149,7 @@ export default function ManageAdminsPage() {
         </div>
         <div>
           <h1 className="text-3xl font-bold">Manage Admins</h1>
-          <p className="text-muted-foreground text-sm">Control admin accounts and their permissions</p>
+          <p className="text-muted-foreground text-sm">Control admin accounts, permissions, and security</p>
         </div>
       </div>
 
@@ -154,7 +176,7 @@ export default function ManageAdminsPage() {
                     <th className="text-left px-6 py-4 font-semibold">Email</th>
                     <th className="text-left px-6 py-4 font-semibold">Status</th>
                     <th className="text-left px-6 py-4 font-semibold">Permissions</th>
-                    <th className="text-left px-6 py-4 font-semibold">Actions</th>
+                    <th className="text-left px-6 py-4 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -184,20 +206,24 @@ export default function ManageAdminsPage() {
                         <td className="px-6 py-4">
                           <span className="text-muted-foreground text-xs">{grantedCount}/{PERMISSION_KEYS.length} granted</span>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2">
-                            <Button size="sm" variant="outline" onClick={() => openPerms(admin)} className="gap-1.5">
-                              <Settings2 size={14} /> Permissions
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button size="sm" variant="outline" onClick={() => openPerms(admin)} className="gap-1.5" title="Edit Permissions">
+                              <Settings2 size={14} /> <span className="hidden xl:inline">Permissions</span>
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => setResetPasswordAdmin(admin)} className="gap-1.5">
-                              <Key size={14} /> Reset Password
+                            <Button size="sm" variant="outline" onClick={() => setResetPasswordAdmin(admin)} className="gap-1.5" title="Reset Password">
+                              <Key size={14} /> <span className="hidden xl:inline">Reset</span>
                             </Button>
                             <Button
                               size="sm"
-                              variant={admin.status === 'Approved' ? 'destructive' : 'default'}
+                              variant={admin.status === 'Approved' ? 'secondary' : 'default'}
                               onClick={() => toggleStatus(admin)}
+                              className="w-[85px]"
                             >
                               {admin.status === 'Approved' ? 'Suspend' : 'Activate'}
+                            </Button>
+                            <Button size="sm" variant="destructive" onClick={() => setDeleteAdmin(admin)} className="gap-1.5" title="Delete Admin">
+                              <Trash2 size={14} /> <span className="hidden xl:inline">Delete</span>
                             </Button>
                           </div>
                         </td>
@@ -275,6 +301,35 @@ export default function ManageAdminsPage() {
                 setResetPasswordAdmin(null);
                 setNewPassword('');
               }} className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Admin Modal */}
+      {deleteAdmin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-background rounded-2xl shadow-2xl w-full max-w-md border">
+            <div className="p-6 border-b">
+              <h2 className="text-xl font-bold text-destructive flex items-center gap-2">
+                <Trash2 size={24} /> Delete Admin?
+              </h2>
+            </div>
+            <div className="p-6">
+              <p className="text-foreground">
+                Are you absolutely sure you want to permanently delete <strong>{deleteAdmin.full_name}</strong>?
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                This action cannot be undone. It will remove their profile and all associated access instantly.
+              </p>
+            </div>
+            <div className="p-6 border-t flex gap-3">
+              <Button variant="destructive" onClick={handleDeleteUser} disabled={deleting} className="flex-1">
+                {deleting ? 'Deleting...' : 'Yes, Delete Permanently'}
+              </Button>
+              <Button variant="outline" onClick={() => setDeleteAdmin(null)} className="flex-1">
                 Cancel
               </Button>
             </div>
