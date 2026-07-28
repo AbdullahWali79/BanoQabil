@@ -65,6 +65,15 @@ export interface Teacher {
   id: string;
   profile_id: string;
   specialization: string | null;
+  username?: string | null;
+  cnic?: string | null;
+  province?: string | null;
+  region?: string | null;
+  district?: string | null;
+  city?: string | null;
+  experience?: string | null;
+  address?: string | null;
+  trainer_code?: string | null;
   profiles?: Profile;
 }
 

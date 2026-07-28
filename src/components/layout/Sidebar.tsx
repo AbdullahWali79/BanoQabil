@@ -11,8 +11,9 @@ import {
   FileText,
   GraduationCap,
   ChevronRight,
-  Shield,
-  Layers,
+  Upload,
+  CalendarCheck,
+  Bell,
 } from 'lucide-react';
 
 type NavItem = {
@@ -29,43 +30,34 @@ export function Sidebar() {
       { to: '/dashboard', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
     ];
 
-    if (role === 'Super Admin') {
-      baseLinks.push(
-        { to: '/dashboard/approvals', icon: <UserCheck size={20} />, label: 'Pending Approvals' },
-        { to: '/dashboard/admins', icon: <Shield size={20} />, label: 'Manage Admins' },
-        { to: '/dashboard/teachers', icon: <Users size={20} />, label: 'Manage Teachers' },
-        { to: '/dashboard/students', icon: <GraduationCap size={20} />, label: 'Manage Students' },
-        { to: '/dashboard/courses', icon: <BookOpen size={20} />, label: 'Courses & Batches' },
-        { to: '/dashboard/all-assignments', icon: <ClipboardCheck size={20} />, label: 'All Assignments' },
-        { to: '/dashboard/all-submissions', icon: <Layers size={20} />, label: 'All Submissions' },
-        { to: '/dashboard/reports', icon: <FileText size={20} />, label: 'Reports' },
-      );
-    }
-
-    if (role === 'Admin') {
+    if (role === 'Super Admin' || role === 'Admin') {
       baseLinks.push(
         { to: '/dashboard/approvals', icon: <UserCheck size={20} />, label: 'Pending Approvals' },
         { to: '/dashboard/teachers', icon: <Users size={20} />, label: 'Manage Teachers' },
         { to: '/dashboard/students', icon: <GraduationCap size={20} />, label: 'Manage Students' },
         { to: '/dashboard/courses', icon: <BookOpen size={20} />, label: 'Courses & Batches' },
-        { to: '/dashboard/all-assignments', icon: <ClipboardCheck size={20} />, label: 'All Assignments' },
-        { to: '/dashboard/all-submissions', icon: <Layers size={20} />, label: 'All Submissions' },
         { to: '/dashboard/reports', icon: <FileText size={20} />, label: 'Reports' },
       );
     }
 
     if (role === 'Teacher') {
       baseLinks.push(
-        { to: '/dashboard/my-class', icon: <Users size={20} />, label: 'My Class' },
+        { to: '/dashboard/my-class', icon: <Users size={20} />, label: 'My Classes' },
         { to: '/dashboard/assignments', icon: <ClipboardCheck size={20} />, label: 'Assignments' },
+        { to: '/dashboard/attendance', icon: <CalendarCheck size={20} />, label: 'Attendance' },
+        { to: '/dashboard/notifications', icon: <Bell size={20} />, label: 'Notifications' },
         { to: '/dashboard/progress', icon: <BarChart2 size={20} />, label: 'Student Progress' },
       );
     }
 
     if (role === 'Student') {
       baseLinks.push(
-        { to: '/dashboard/my-assignments', icon: <ClipboardCheck size={20} />, label: 'My Assignments' },
-        { to: '/dashboard/my-grades', icon: <BarChart2 size={20} />, label: 'My Grades' },
+        { to: '/dashboard/my-profile', icon: <Users size={20} />, label: 'My Profile' },
+        { to: '/dashboard/my-attendance', icon: <CalendarCheck size={20} />, label: 'Attendance' },
+        { to: '/dashboard/my-assignments', icon: <ClipboardCheck size={20} />, label: 'Assignments' },
+        { to: '/dashboard/my-submissions', icon: <Upload size={20} />, label: 'My Submissions' },
+        { to: '/dashboard/my-grades', icon: <GraduationCap size={20} />, label: 'My Grades' },
+        { to: '/dashboard/my-notifications', icon: <Bell size={20} />, label: 'Notifications' },
       );
     }
 
@@ -77,14 +69,6 @@ export function Sidebar() {
 
   return (
     <aside className="w-60 min-h-screen bg-card border-r border-border flex flex-col shrink-0 shadow-sm">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-5 py-5 border-b border-border">
-        <div className="h-9 w-9 bg-gradient-to-br from-primary to-purple-600 rounded-xl flex items-center justify-center shadow-md">
-          <GraduationCap className="text-white" size={20} />
-        </div>
-        <span className="text-lg font-bold tracking-tight">BanoQabil</span>
-      </div>
-
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {role && (

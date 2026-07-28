@@ -1,32 +1,33 @@
-# React + TypeScript + Vite
+# BanoQabil LMS
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript + Vite learning management system for BanoQabil Educational Institute (Supabase backend).
 
-Currently, two official plugins are available:
+## Quick start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Project structure
+
+```
+src/           App source (features by role: admin, teacher, student, auth)
+public/        Static assets (logo, favicons)
+sql/           Database schema / migration SQL (run in Supabase SQL editor)
+scripts/       One-off seed & data scripts (not part of the web app)
+data/students/ Excel sheets used by seed scripts
+supabase/      Edge functions
+```
+
+## Useful scripts
+
+Run from the repo root:
+
+```bash
+node scripts/seed_students_from_sheets.mjs
+node scripts/assign_teachers_from_sheets.mjs
+node scripts/seed_courses_from_students.mjs
+```
+
+SQL files live in `sql/` — apply in order as needed when setting up a new database.

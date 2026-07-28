@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router';
 import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/store/authStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -26,6 +27,7 @@ export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const setAuthLoading = useAuthStore((s) => s.setLoading);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -51,7 +53,8 @@ export function LoginForm() {
       return;
     }
 
-    // On successful login, the auth state listener in App will handle redirection based on role
+    // Keep the app in loading state until App.tsx resolves the user role
+    setAuthLoading(true);
     navigate('/dashboard');
   }
 

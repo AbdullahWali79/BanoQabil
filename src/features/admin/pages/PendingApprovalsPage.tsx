@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
-import { UserCheck, UserX, ShieldCheck, Mail, Calendar } from 'lucide-react';
+import { UserCheck, UserX, ShieldCheck, Mail, Calendar, BookOpen } from 'lucide-react';
+import { ensureStudentRow, ensureTeacherRow, relationOne } from '@/features/teacher/utils/teacherData';
 
 type PendingUser = {
   id: string;
@@ -9,15 +10,19 @@ type PendingUser = {
   email: string;
   role: string;
   created_at: string;
+  course_name: string | null;
+  course_id: string | null;
 };
 
 export function PendingApprovalsPage() {
   const [users, setUsers] = useState<PendingUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const fetchPendingUsers = async () => {
     setIsLoading(true);
-    // Use LEFT join (no !inner) so users without a role_id still appear
+    setErrorMessage('');
     const { data, error } = await supabase
       .from('profiles')
       .select(`
@@ -25,19 +30,57 @@ export function PendingApprovalsPage() {
         full_name,
         email,
         created_at,
-        roles(name)
+        roles(name),
+        students(course_id, courses(name))
       `)
       .eq('status', 'Pending')
       .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      const mappedData = data.map((d: any) => ({
-        id: d.id,
-        full_name: d.full_name || 'Unknown User',
-        email: d.email,
-        role: d.roles?.name || 'Unknown',
-        created_at: new Date(d.created_at).toLocaleDateString(),
-      }));
+    if (error) {
+      // Fallback without students join if schema not ready
+      const fallback = await supabase
+        .from('profiles')
+        .select(`id, full_name, email, created_at, roles(name)`)
+        .eq('status', 'Pending')
+        .order('created_at', { ascending: false });
+
+      if (fallback.error) {
+        setErrorMessage(fallback.error.message);
+        setUsers([]);
+      } else {
+        setUsers(
+          (fallback.data ?? []).map((d: any) => {
+            const roleRel = relationOne<{ name?: string }>(d.roles);
+            return {
+              id: d.id,
+              full_name: d.full_name || 'Unknown User',
+              email: d.email,
+              role: roleRel?.name || 'Unknown',
+              created_at: new Date(d.created_at).toLocaleDateString(),
+              course_name: null,
+              course_id: null,
+            };
+          }),
+        );
+      }
+    } else {
+      const mappedData = (data ?? []).map((d: any) => {
+        const roleRel = relationOne<{ name?: string }>(d.roles);
+        const studentRel = relationOne<{
+          course_id?: string | null;
+          courses?: { name?: string } | { name?: string }[] | null;
+        }>(d.students);
+        const course = relationOne(studentRel?.courses);
+        return {
+          id: d.id,
+          full_name: d.full_name || 'Unknown User',
+          email: d.email,
+          role: roleRel?.name || 'Unknown',
+          created_at: new Date(d.created_at).toLocaleDateString(),
+          course_name: course?.name || null,
+          course_id: studentRel?.course_id || null,
+        };
+      });
       setUsers(mappedData);
     }
     setIsLoading(false);
@@ -47,21 +90,47 @@ export function PendingApprovalsPage() {
     fetchPendingUsers();
   }, []);
 
-  const handleAction = async (userId: string, status: 'Approved' | 'Rejected') => {
+  const handleAction = async (user: PendingUser, status: 'Approved' | 'Rejected') => {
+    setActionId(user.id);
+    setErrorMessage('');
+
     const { error } = await supabase
       .from('profiles')
       .update({ status })
-      .eq('id', userId);
+      .eq('id', user.id);
 
-    if (!error) {
-      setUsers(users.filter(u => u.id !== userId));
-    } else {
-      alert("Error updating user status");
+    if (error) {
+      setErrorMessage(error.message);
+      setActionId(null);
+      return;
     }
+
+    if (status === 'Approved') {
+      try {
+        const role = user.role.toLowerCase();
+        if (role === 'teacher') {
+          await ensureTeacherRow(user.id);
+        } else if (role === 'student') {
+          await ensureStudentRow(user.id, { course_id: user.course_id });
+        }
+      } catch (membershipError: any) {
+        setErrorMessage(
+          membershipError?.message ||
+            'Approved, but could not create teacher/student record. Check RLS policies.',
+        );
+      }
+    }
+
+    setUsers((prev) => prev.filter((u) => u.id !== user.id));
+    setActionId(null);
   };
 
   if (isLoading) {
-    return <div className="flex h-64 items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>;
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
   }
 
   return (
@@ -69,9 +138,15 @@ export function PendingApprovalsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Pending Approvals</h1>
         <p className="text-muted-foreground mt-2">
-          Review and approve or reject new account registrations.
+          Review and approve or reject new student applications.
         </p>
       </div>
+
+      {errorMessage && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {errorMessage}
+        </div>
+      )}
 
       {users.length === 0 ? (
         <div className="bg-card rounded-xl border p-12 text-center text-muted-foreground shadow-sm">
@@ -82,14 +157,21 @@ export function PendingApprovalsPage() {
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {users.map((user) => (
-            <div key={user.id} className="bg-card rounded-xl border shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col">
+            <div
+              key={user.id}
+              className="bg-card rounded-xl border shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col"
+            >
               <div className="p-6 flex-1">
                 <div className="flex justify-between items-start mb-4">
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                    user.role === 'Admin' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
-                    user.role === 'Teacher' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                    'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                  }`}>
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      user.role === 'Admin' || user.role === 'Super Admin'
+                        ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                        : user.role === 'Teacher'
+                          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                          : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                    }`}
+                  >
                     {user.role}
                   </span>
                   <span className="flex items-center text-xs text-muted-foreground">
@@ -97,30 +179,42 @@ export function PendingApprovalsPage() {
                     {user.created_at}
                   </span>
                 </div>
-                
+
                 <h3 className="text-xl font-semibold mb-1 truncate" title={user.full_name}>
                   {user.full_name}
                 </h3>
-                
+
                 <div className="space-y-2 mt-4 text-sm text-muted-foreground">
                   <div className="flex items-center gap-2">
                     <Mail size={16} />
-                    <span className="truncate" title={user.email}>{user.email}</span>
+                    <span className="truncate" title={user.email}>
+                      {user.email}
+                    </span>
                   </div>
+                  {user.course_name && (
+                    <div className="flex items-center gap-2">
+                      <BookOpen size={16} />
+                      <span className="truncate" title={user.course_name}>
+                        {user.course_name}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
-              
+
               <div className="bg-muted/50 p-4 border-t flex gap-3">
-                <Button 
-                  onClick={() => handleAction(user.id, 'Approved')}
+                <Button
+                  onClick={() => handleAction(user, 'Approved')}
+                  disabled={actionId === user.id}
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                 >
                   <UserCheck size={16} className="mr-2" />
                   Approve
                 </Button>
-                <Button 
+                <Button
                   variant="outline"
-                  onClick={() => handleAction(user.id, 'Rejected')}
+                  disabled={actionId === user.id}
+                  onClick={() => handleAction(user, 'Rejected')}
                   className="flex-1 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/20"
                 >
                   <UserX size={16} className="mr-2" />

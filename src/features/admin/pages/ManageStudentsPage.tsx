@@ -1,117 +1,999 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useMemo, useState } from 'react';
+import { supabase, createEphemeralAuthClient } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Edit, GraduationCap } from 'lucide-react';
+import {
+  Search,
+  Edit,
+  GraduationCap,
+  RefreshCw,
+  Plus,
+  Trash2,
+  X,
+  KeyRound,
+} from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { ensureStudentRow, relationOne } from '@/features/teacher/utils/teacherData';
+import {
+  adminSetUserPassword,
+} from '@/lib/adminPassword';
+
+type Profile = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  status: string | null;
+};
+
+type StudentRow = {
+  id: string;
+  father_name: string | null;
+  application_id: string | null;
+  enrollment_date: string | null;
+  batch_id: string | null;
+  course_id: string | null;
+  gender: string | null;
+  profiles: Profile | Profile[];
+  batches?: { id: string; name: string } | { id: string; name: string }[] | null;
+  courses?: { id: string; name: string } | { id: string; name: string }[] | null;
+};
+
+type StudentForm = {
+  full_name: string;
+  email: string;
+  phone: string;
+  father_name: string;
+  application_id: string;
+  gender: string;
+  course_id: string;
+  batch_id: string;
+  status: string;
+  password: string;
+  confirmPassword: string;
+};
+
+const emptyForm: StudentForm = {
+  full_name: '',
+  email: '',
+  phone: '',
+  father_name: '',
+  application_id: '',
+  gender: '',
+  course_id: '',
+  batch_id: '',
+  status: 'Approved',
+  password: '',
+  confirmPassword: '',
+};
+
+function cleanBatchLabel(name: string) {
+  return name.replace(/^tid:[a-f0-9-]+\|/i, '');
+}
 
 export default function ManageStudentsPage() {
-  const [students, setStudents] = useState<any[]>([]);
+  const [students, setStudents] = useState<StudentRow[]>([]);
+  const [batches, setBatches] = useState<{ id: string; name: string }[]>([]);
+  const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [editing, setEditing] = useState<StudentRow | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState<StudentForm>(emptyForm);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [studentRoleId, setStudentRoleId] = useState<string | null>(null);
+  const [useAppIdAsPassword, setUseAppIdAsPassword] = useState(false);
+  const [genderFilter, setGenderFilter] = useState<'All' | 'Male' | 'Female'>('All');
+  const [courseFilter, setCourseFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState<'All' | 'Approved' | 'Suspended' | 'Pending'>('All');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 100;
+  const [resetTarget, setResetTarget] = useState<StudentRow | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetConfirm, setResetConfirm] = useState('');
+  const [resetting, setResetting] = useState(false);
+
+  const setField = (key: keyof StudentForm, value: string) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
 
   const fetchStudents = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('students')
-      .select('id, father_name, application_id, enrollment_date, profiles!inner(id, full_name, email, phone, status), batches(id, name)');
-    
-    if (data) setStudents(data);
+    const [{ data, error }, batchesRes, coursesRes] = await Promise.all([
+      supabase
+        .from('students')
+        .select(
+          `id, father_name, application_id, enrollment_date, batch_id, course_id, gender,
+           profiles!inner(id, full_name, email, phone, status),
+           batches(id, name),
+           courses(id, name)`,
+        )
+        .order('id'),
+      supabase.from('batches').select('id, name').order('name'),
+      supabase.from('courses').select('id, name').order('name'),
+    ]);
+
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+      setStudents([]);
+    } else {
+      setStudents((data as StudentRow[]) ?? []);
+    }
+    setBatches(
+      (batchesRes.data ?? []).map((b) => ({ id: b.id, name: cleanBatchLabel(b.name) })),
+    );
+    setCourses((coursesRes.data as { id: string; name: string }[]) ?? []);
     setLoading(false);
   };
 
   useEffect(() => {
+    supabase.from('roles').select('id, name').then(({ data }) => {
+      setStudentRoleId(data?.find((r) => r.name === 'Student')?.id ?? null);
+    });
     fetchStudents();
   }, []);
 
-  const filteredStudents = students.filter(s => 
-    s.profiles.full_name?.toLowerCase().includes(search.toLowerCase()) || 
-    s.profiles.email?.toLowerCase().includes(search.toLowerCase()) ||
-    s.application_id?.toLowerCase().includes(search.toLowerCase())
+  const filteredStudents = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return students.filter((s) => {
+      if (genderFilter !== 'All' && s.gender !== genderFilter) return false;
+      const course = relationOne(s.courses);
+      if (courseFilter !== 'All' && course?.id !== courseFilter) return false;
+      const p = relationOne(s.profiles);
+      if (statusFilter !== 'All' && (p?.status || '') !== statusFilter) return false;
+      if (!q) return true;
+      const batch = relationOne(s.batches);
+      return (
+        p?.full_name?.toLowerCase().includes(q) ||
+        p?.email?.toLowerCase().includes(q) ||
+        s.application_id?.toLowerCase().includes(q) ||
+        p?.phone?.toLowerCase().includes(q) ||
+        course?.name?.toLowerCase().includes(q) ||
+        cleanBatchLabel(batch?.name || '').toLowerCase().includes(q)
+      );
+    });
+  }, [students, search, genderFilter, courseFilter, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / PAGE_SIZE));
+
+  const pagedStudents = useMemo(() => {
+    const safePage = Math.min(page, totalPages);
+    const start = (safePage - 1) * PAGE_SIZE;
+    return filteredStudents.slice(start, start + PAGE_SIZE);
+  }, [filteredStudents, page, totalPages]);
+
+  // Reset to page 1 when filters/search change
+  useEffect(() => {
+    setPage(1);
+  }, [search, genderFilter, courseFilter, statusFilter]);
+
+  const genderCounts = useMemo(() => {
+    return {
+      All: students.length,
+      Female: students.filter((s) => s.gender === 'Female').length,
+      Male: students.filter((s) => s.gender === 'Male').length,
+    };
+  }, [students]);
+
+  const assignedCount = useMemo(
+    () => students.filter((s) => s.batch_id).length,
+    [students],
   );
 
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Manage Students</h1>
-          <p className="text-muted-foreground mt-1">View and manage enrolled students</p>
-        </div>
-      </div>
+  const openAdd = () => {
+    setForm(emptyForm);
+    setUseAppIdAsPassword(false);
+    setEditing(null);
+    setShowAdd(true);
+  };
 
-      <Card className="shadow-sm border-slate-200 dark:border-slate-800">
-        <CardContent className="p-0">
-          <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <Input 
-                placeholder="Search students..." 
-                className="pl-9"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+  const openEdit = (student: StudentRow) => {
+    const p = relationOne(student.profiles);
+    setEditing(student);
+    setForm({
+      full_name: p?.full_name || '',
+      email: p?.email || '',
+      phone: p?.phone || '',
+      father_name: student.father_name || '',
+      application_id: student.application_id || '',
+      gender: student.gender || '',
+      course_id: student.course_id || '',
+      batch_id: student.batch_id || '',
+      status: p?.status || 'Approved',
+      password: '',
+      confirmPassword: '',
+    });
+    setShowAdd(false);
+  };
+
+  const openResetPassword = (student: StudentRow) => {
+    setResetTarget(student);
+    setResetPassword('');
+    setResetConfirm('');
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetTarget) return;
+    const profile = relationOne(resetTarget.profiles);
+    if (!profile?.id) return;
+
+    if (resetPassword.length < 6) {
+      setMessage({ type: 'error', text: 'New password must be at least 6 characters.' });
+      return;
+    }
+    if (resetPassword !== resetConfirm) {
+      setMessage({ type: 'error', text: 'Password and Confirm Password do not match.' });
+      return;
+    }
+
+    setResetting(true);
+    setMessage(null);
+    try {
+      await adminSetUserPassword(profile.id, resetPassword);
+      setMessage({
+        type: 'success',
+        text: `Password updated for ${profile.full_name}.`,
+      });
+      setResetTarget(null);
+    } catch (err: any) {
+      setMessage({
+        type: 'error',
+        text:
+          err?.message ||
+          'Direct password reset failed. Deploy edge function admin-set-password.',
+      });
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    if (!form.full_name.trim()) {
+      setMessage({ type: 'error', text: 'Name is required.' });
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+
+    const profile = relationOne(editing.profiles);
+    const profileId = profile?.id;
+    if (!profileId) {
+      setMessage({ type: 'error', text: 'Student profile missing.' });
+      setSaving(false);
+      return;
+    }
+
+    const [{ error: profileError }, { error: studentError }] = await Promise.all([
+      supabase
+        .from('profiles')
+        .update({
+          full_name: form.full_name.trim(),
+          phone: form.phone.trim() || null,
+          status: form.status,
+        })
+        .eq('id', profileId),
+      supabase
+        .from('students')
+        .update({
+          father_name: form.father_name.trim() || null,
+          application_id: form.application_id.trim() || null,
+          gender: form.gender || null,
+          course_id: form.course_id || null,
+          batch_id: form.batch_id || null,
+        })
+        .eq('id', editing.id),
+    ]);
+
+    if (profileError || studentError) {
+      setMessage({
+        type: 'error',
+        text: profileError?.message || studentError?.message || 'Update failed',
+      });
+      setSaving(false);
+      return;
+    }
+
+    setMessage({ type: 'success', text: 'Student updated successfully.' });
+    setEditing(null);
+    setSaving(false);
+    await fetchStudents();
+  };
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMessage(null);
+
+    if (!form.full_name.trim() || !form.email.trim()) {
+      setMessage({ type: 'error', text: 'Name and email are required.' });
+      return;
+    }
+    if (!form.application_id.trim()) {
+      setMessage({ type: 'error', text: 'Application ID is required.' });
+      return;
+    }
+    if (!studentRoleId) {
+      setMessage({ type: 'error', text: 'Student role not found.' });
+      return;
+    }
+
+    const password = useAppIdAsPassword
+      ? form.application_id.trim()
+      : form.password.trim();
+
+    if (password.length < 6) {
+      setMessage({
+        type: 'error',
+        text: 'Password must be at least 6 characters.',
+      });
+      return;
+    }
+    if (!useAppIdAsPassword && password !== form.confirmPassword.trim()) {
+      setMessage({ type: 'error', text: 'Password and Confirm Password do not match.' });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const ephemeral = createEphemeralAuthClient();
+      const { data: authData, error: signUpError } = await ephemeral.auth.signUp({
+        email: form.email.trim(),
+        password,
+        options: {
+          data: {
+            full_name: form.full_name.trim(),
+            role: 'Student',
+            application_id: form.application_id.trim(),
+          },
+        },
+      });
+      if (signUpError) throw new Error(signUpError.message);
+      const userId = authData.user?.id;
+      if (!userId) throw new Error('Student account was not created.');
+
+      await new Promise((r) => setTimeout(r, 600));
+
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', userId)
+        .limit(1);
+
+      const profilePatch = {
+        full_name: form.full_name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim() || null,
+        role_id: studentRoleId,
+        status: form.status || 'Approved',
+      };
+
+      if (existingProfile?.[0]) {
+        const { error } = await supabase.from('profiles').update(profilePatch).eq('id', userId);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await supabase.from('profiles').insert({ id: userId, ...profilePatch });
+        if (error) throw new Error(error.message);
+      }
+
+      await ensureStudentRow(userId, {
+        course_id: form.course_id || null,
+        batch_id: form.batch_id || null,
+      });
+
+      await supabase
+        .from('students')
+        .update({
+          father_name: form.father_name.trim() || null,
+          application_id: form.application_id.trim(),
+          gender: form.gender || null,
+          course_id: form.course_id || null,
+          batch_id: form.batch_id || null,
+        })
+        .eq('profile_id', userId);
+
+      setMessage({
+        type: 'success',
+        text: useAppIdAsPassword
+          ? `Student "${form.full_name.trim()}" added. Login: ${form.email.trim()} · Password = Application ID`
+          : `Student "${form.full_name.trim()}" added. Login: ${form.email.trim()} (password set by admin).`,
+      });
+      setShowAdd(false);
+      setForm(emptyForm);
+      await fetchStudents();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err?.message || 'Failed to add student.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeStudent = async (student: StudentRow) => {
+    const p = relationOne(student.profiles);
+    if (
+      !confirm(
+        `Remove student "${p?.full_name}"?\n\nThis removes their student record and suspends the account. Auth login may still exist.`,
+      )
+    ) {
+      return;
+    }
+
+    const { error: delError } = await supabase.from('students').delete().eq('id', student.id);
+    if (delError) {
+      setMessage({ type: 'error', text: delError.message });
+      return;
+    }
+    if (p?.id) {
+      await supabase.from('profiles').update({ status: 'Suspended' }).eq('id', p.id);
+    }
+    setMessage({ type: 'success', text: 'Student removed and account suspended.' });
+    await fetchStudents();
+  };
+
+  const syncMissingRows = async () => {
+    setSyncing(true);
+    setMessage(null);
+    try {
+      if (!studentRoleId) {
+        setMessage({ type: 'error', text: 'Student role not found.' });
+        setSyncing(false);
+        return;
+      }
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('status', 'Approved')
+        .eq('role_id', studentRoleId);
+
+      for (const profile of profiles ?? []) {
+        await ensureStudentRow(profile.id);
+      }
+      setMessage({ type: 'success', text: 'Synced student records from approved profiles.' });
+      await fetchStudents();
+    } catch (err: any) {
+      setMessage({
+        type: 'error',
+        text: err?.message || 'Sync failed (check RLS insert policy on students).',
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const formFields = (mode: 'add' | 'edit') => (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-2 sm:col-span-2">
+        <label className="text-sm font-medium">
+          Full Name <span className="text-destructive">*</span>
+        </label>
+        <Input
+          value={form.full_name}
+          onChange={(e) => setField('full_name', e.target.value)}
+          placeholder="Student full name"
+        />
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">
+          Email {mode === 'add' ? <span className="text-destructive">*</span> : null}
+        </label>
+        <Input
+          type="email"
+          value={form.email}
+          onChange={(e) => setField('email', e.target.value)}
+          disabled={mode === 'edit'}
+          placeholder="student@gmail.com"
+        />
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Phone</label>
+        <Input
+          value={form.phone}
+          onChange={(e) => setField('phone', e.target.value)}
+          placeholder="03XXXXXXXXX"
+        />
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Father Name</label>
+        <Input
+          value={form.father_name}
+          onChange={(e) => setField('father_name', e.target.value)}
+          placeholder="Optional"
+        />
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">
+          Application ID <span className="text-destructive">*</span>
+        </label>
+        <Input
+          value={form.application_id}
+          onChange={(e) => setField('application_id', e.target.value)}
+          placeholder="Student application / sheet ID"
+          required={mode === 'add'}
+        />
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Gender</label>
+        <select
+          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+          value={form.gender}
+          onChange={(e) => setField('gender', e.target.value)}
+        >
+          <option value="">Select</option>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+        </select>
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Course</label>
+        <select
+          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+          value={form.course_id}
+          onChange={(e) => setField('course_id', e.target.value)}
+        >
+          <option value="">Unassigned</option>
+          {courses.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Batch / Class</label>
+        <select
+          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+          value={form.batch_id}
+          onChange={(e) => setField('batch_id', e.target.value)}
+        >
+          <option value="">Unassigned</option>
+          {batches.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Status</label>
+        <select
+          className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+          value={form.status}
+          onChange={(e) => setField('status', e.target.value)}
+        >
+          <option value="Approved">Approved</option>
+          <option value="Pending">Pending</option>
+          <option value="Suspended">Suspended</option>
+        </select>
+      </div>
+      {mode === 'add' && (
+        <div className="space-y-3 sm:col-span-2 rounded-md border p-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={useAppIdAsPassword}
+              onChange={(e) => setUseAppIdAsPassword(e.target.checked)}
+            />
+            Use Application ID as Password
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Password {!useAppIdAsPassword ? <span className="text-destructive">*</span> : null}
+              </label>
+              <Input
+                type="password"
+                value={useAppIdAsPassword ? form.application_id : form.password}
+                onChange={(e) => setField('password', e.target.value)}
+                placeholder="Min 6 characters"
+                required={!useAppIdAsPassword}
+                disabled={useAppIdAsPassword}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Confirm Password{' '}
+                {!useAppIdAsPassword ? <span className="text-destructive">*</span> : null}
+              </label>
+              <Input
+                type="password"
+                value={useAppIdAsPassword ? form.application_id : form.confirmPassword}
+                onChange={(e) => setField('confirmPassword', e.target.value)}
+                placeholder="Re-enter password"
+                required={!useAppIdAsPassword}
+                disabled={useAppIdAsPassword}
               />
             </div>
           </div>
-          
+          <p className="text-xs text-muted-foreground">
+            Set a password yourself, or tick “Use Application ID as Password” (same as teachers).
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="p-6 sm:p-8 space-y-6">
+      <div className="flex justify-between items-center flex-wrap gap-3">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Manage Students</h1>
+          <p className="text-muted-foreground mt-1">
+            Search, filter, and manage students — 100 per page.
+          </p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" className="gap-2" onClick={syncMissingRows} disabled={syncing}>
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            Sync Records
+          </Button>
+          <Button className="gap-2" onClick={openAdd}>
+            <Plus className="w-4 h-4" /> Add Student
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Total</p>
+            <p className="text-2xl font-bold mt-1">{students.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-pink-700 uppercase tracking-wide font-medium">Female</p>
+            <p className="text-2xl font-bold mt-1 text-pink-800">{genderCounts.Female}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-sky-700 uppercase tracking-wide font-medium">Male</p>
+            <p className="text-2xl font-bold mt-1 text-sky-800">{genderCounts.Male}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">In Batch</p>
+            <p className="text-2xl font-bold mt-1">{assignedCount}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {message && (
+        <div
+          className={`rounded-md border px-4 py-3 text-sm ${
+            message.type === 'success'
+              ? 'border-green-300 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-900/20 dark:text-green-300'
+              : 'border-destructive/40 bg-destructive/10 text-destructive'
+          }`}
+        >
+          {message.text}
+        </div>
+      )}
+
+      <Card className="shadow-sm overflow-hidden">
+        <CardContent className="p-0">
+          <div className="p-4 border-b space-y-3 bg-muted/20">
+            <div className="flex flex-wrap gap-2">
+              {(['All', 'Female', 'Male'] as const).map((g) => (
+                <Button
+                  key={g}
+                  type="button"
+                  size="sm"
+                  variant={genderFilter === g ? 'default' : 'outline'}
+                  onClick={() => setGenderFilter(g)}
+                >
+                  {g} ({genderCounts[g]})
+                </Button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative w-72 max-w-full">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search name, email, phone, app ID, course..."
+                  className="pl-9 bg-background"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+              <select
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                value={courseFilter}
+                onChange={(e) => setCourseFilter(e.target.value)}
+              >
+                <option value="All">All Courses</option>
+                {courses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+              >
+                <option value="All">All Status</option>
+                <option value="Approved">Approved</option>
+                <option value="Suspended">Suspended</option>
+                <option value="Pending">Pending</option>
+              </select>
+              <p className="text-sm text-muted-foreground ml-auto">
+                {filteredStudents.length} result(s)
+                {filteredStudents.length > PAGE_SIZE
+                  ? ` · Page ${Math.min(page, totalPages)} / ${totalPages}`
+                  : ''}
+              </p>
+            </div>
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
-              <thead className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-900/50 uppercase">
+              <thead className="text-xs text-muted-foreground bg-muted/50 uppercase tracking-wide">
                 <tr>
-                  <th className="px-6 py-4 font-medium">App ID</th>
-                  <th className="px-6 py-4 font-medium">Name</th>
-                  <th className="px-6 py-4 font-medium">Email</th>
-                  <th className="px-6 py-4 font-medium">Batch</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4 font-medium text-right">Actions</th>
+                  <th className="px-4 py-3 font-semibold">SR#</th>
+                  <th className="px-4 py-3 font-semibold">App ID</th>
+                  <th className="px-4 py-3 font-semibold">Name</th>
+                  <th className="px-4 py-3 font-semibold">Contact</th>
+                  <th className="px-4 py-3 font-semibold">Course</th>
+                  <th className="px-4 py-3 font-semibold">Batch</th>
+                  <th className="px-4 py-3 font-semibold">Gender</th>
+                  <th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 font-semibold text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={6} className="text-center py-10"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div></td></tr>
-                ) : filteredStudents.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-12">
-                      <GraduationCap className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                      <p className="text-slate-500">No students found</p>
+                    <td colSpan={9} className="text-center py-10">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
+                    </td>
+                  </tr>
+                ) : pagedStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="text-center py-12">
+                      <GraduationCap className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+                      <p className="text-muted-foreground">No students found</p>
+                      <Button className="mt-4 gap-2" onClick={openAdd}>
+                        <Plus className="w-4 h-4" /> Add Student
+                      </Button>
                     </td>
                   </tr>
                 ) : (
-                  filteredStudents.map((s) => (
-                    <tr key={s.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
-                      <td className="px-6 py-4 font-mono text-xs">{s.application_id || '-'}</td>
-                      <td className="px-6 py-4 font-medium">{s.profiles.full_name}</td>
-                      <td className="px-6 py-4">{s.profiles.email}</td>
-                      <td className="px-6 py-4">
-                        {s.batches ? (
-                          <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300">
-                            {s.batches.name}
+                  pagedStudents.map((s, index) => {
+                    const profile = relationOne(s.profiles);
+                    const batch = relationOne(s.batches);
+                    const course = relationOne(s.courses);
+                    const sr = (Math.min(page, totalPages) - 1) * PAGE_SIZE + index + 1;
+                    return (
+                      <tr key={s.id} className="border-b hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-3 text-muted-foreground font-medium">{sr}</td>
+                        <td className="px-4 py-3 font-mono text-xs">{s.application_id || '—'}</td>
+                        <td className="px-4 py-3 font-medium">{profile?.full_name || '—'}</td>
+                        <td className="px-4 py-3">
+                          <p className="text-sm">{profile?.email || '—'}</p>
+                          <p className="text-xs text-muted-foreground">{profile?.phone || 'No phone'}</p>
+                        </td>
+                        <td className="px-4 py-3 text-xs max-w-[140px]">{course?.name || '—'}</td>
+                        <td className="px-4 py-3">
+                          {batch ? (
+                            <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-muted">
+                              {cleanBatchLabel(batch.name)}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground italic text-xs">Unassigned</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {s.gender === 'Female' ? (
+                            <span className="inline-flex rounded-md bg-pink-100 px-2 py-0.5 text-xs font-semibold text-pink-800">
+                              Female
+                            </span>
+                          ) : s.gender === 'Male' ? (
+                            <span className="inline-flex rounded-md bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-800">
+                              Male
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              profile?.status === 'Approved'
+                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                : profile?.status === 'Suspended'
+                                  ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                  : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                            }`}
+                          >
+                            {profile?.status || '—'}
                           </span>
-                        ) : (
-                          <span className="text-slate-400 italic text-xs">Unassigned</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          s.profiles.status === 'Approved' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' :
-                          s.profiles.status === 'Suspended' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' :
-                          'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                        }`}>
-                          {s.profiles.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-blue-600"><Edit className="w-4 h-4" /></Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="Edit"
+                              onClick={() => openEdit(s)}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="Reset Password"
+                              onClick={() => openResetPassword(s)}
+                            >
+                              <KeyRound className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive"
+                              title="Remove"
+                              onClick={() => removeStudent(s)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
+
+          {filteredStudents.length > PAGE_SIZE && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 bg-muted/10">
+              <p className="text-sm text-muted-foreground">
+                Showing {(Math.min(page, totalPages) - 1) * PAGE_SIZE + 1}–
+                {Math.min(Math.min(page, totalPages) * PAGE_SIZE, filteredStudents.length)} of{' '}
+                {filteredStudents.length}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="text-sm font-medium px-2">
+                  {Math.min(page, totalPages)} / {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-2xl shadow-lg border-none max-h-[90vh] overflow-y-auto">
+            <CardContent className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold">Edit Student</h2>
+                <Button variant="ghost" size="icon" onClick={() => setEditing(null)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              {formFields('edit')}
+              <div className="flex justify-end gap-3 pt-2">
+                <Button variant="outline" onClick={() => setEditing(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={saveEdit} disabled={saving}>
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {showAdd && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-2xl shadow-lg border-none max-h-[90vh] overflow-y-auto">
+            <CardContent className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold">Add Student</h2>
+                <Button variant="ghost" size="icon" onClick={() => setShowAdd(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              <form onSubmit={handleAdd} className="space-y-4">
+                {formFields('add')}
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  Fields marked <span className="text-destructive">*</span> are required. Admin
+                  sets the password, or ticks “Use Application ID as Password”.
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={saving}>
+                    {saving ? 'Creating...' : 'Create Student'}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {resetTarget && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-md shadow-lg border-none">
+            <CardContent className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold">Reset Password</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {relationOne(resetTarget.profiles)?.full_name} ·{' '}
+                    {relationOne(resetTarget.profiles)?.email}
+                  </p>
+                  {resetTarget.application_id && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Application ID: <span className="font-mono">{resetTarget.application_id}</span>
+                    </p>
+                  )}
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setResetTarget(null)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">New Password</label>
+                <Input
+                  type="password"
+                  value={resetPassword}
+                  onChange={(e) => setResetPassword(e.target.value)}
+                  placeholder="Min 6 characters"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Confirm Password</label>
+                <Input
+                  type="password"
+                  value={resetConfirm}
+                  onChange={(e) => setResetConfirm(e.target.value)}
+                  placeholder="Re-enter password"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2">
+                <Button onClick={handleResetPassword} disabled={resetting}>
+                  {resetting ? 'Updating...' : 'Set New Password'}
+                </Button>
+                <Button variant="ghost" onClick={() => setResetTarget(null)} disabled={resetting}>
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

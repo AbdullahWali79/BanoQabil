@@ -34,6 +34,15 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     return <Navigate to="/dashboard" replace />;
   }
 
+  // Wait for role before enforcing role-gated pages (avoids false 403 while resolving)
+  if (allowedRoles && !role) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
   if (allowedRoles && role && !allowedRoles.includes(role)) {
     return <Navigate to="/unauthorized" replace />;
   }

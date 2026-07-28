@@ -15,20 +15,24 @@ const ManageTeachersPage = lazy(() => import('@/features/admin/pages/ManageTeach
 const ManageStudentsPage = lazy(() => import('@/features/admin/pages/ManageStudentsPage'));
 const CoursesPage = lazy(() => import('@/features/admin/pages/CoursesPage'));
 const ReportsPage = lazy(() => import('@/features/admin/pages/ReportsPage'));
-const AllSubmissionsPage = lazy(() => import('@/features/admin/pages/AllSubmissionsPage'));
-const AllAssignmentsPage = lazy(() => import('@/features/admin/pages/AllAssignmentsPage'));
-const ManageAdminsPage = lazy(() => import('@/features/superadmin/pages/ManageAdminsPage'));
 
 const TeacherDashboard = lazy(() => import('@/features/teacher/pages/TeacherDashboard'));
 const MyClassPage = lazy(() => import('@/features/teacher/pages/MyClassPage'));
+const TeacherStudentsPage = lazy(() => import('@/features/teacher/pages/TeacherStudentsPage'));
 const TeacherAssignmentsPage = lazy(() => import('@/features/teacher/pages/TeacherAssignmentsPage'));
 const GradeSubmissionsPage = lazy(() => import('@/features/teacher/pages/GradeSubmissionsPage'));
 const StudentProgressPage = lazy(() => import('@/features/teacher/pages/StudentProgressPage'));
+const TeacherAttendancePage = lazy(() => import('@/features/teacher/pages/TeacherAttendancePage'));
+const TeacherNotificationsPage = lazy(() => import('@/features/teacher/pages/TeacherNotificationsPage'));
 
 const StudentDashboard = lazy(() => import('@/features/student/pages/StudentDashboard'));
+const StudentProfilePage = lazy(() => import('@/features/student/pages/StudentProfilePage'));
+const StudentAttendancePage = lazy(() => import('@/features/student/pages/StudentAttendancePage'));
 const StudentAssignmentsPage = lazy(() => import('@/features/student/pages/StudentAssignmentsPage'));
 const MyGradesPage = lazy(() => import('@/features/student/pages/MyGradesPage'));
+const MySubmissionsPage = lazy(() => import('@/features/student/pages/MySubmissionsPage.tsx'));
 const StudentSetupPage = lazy(() => import('@/features/student/pages/StudentSetupPage'));
+const StudentNotificationsPage = lazy(() => import('@/features/student/pages/StudentNotificationsPage'));
 
 const SettingsPage = lazy(() => import('@/features/shared/pages/SettingsPage'));
 
@@ -41,20 +45,26 @@ function PageLoader() {
   );
 }
 
-// Role-aware Dashboard
+// Role-aware Dashboard — shows the correct portal for each role
 function RoleDashboard() {
-  const { role } = useAuthStore();
+  const { role, isLoading } = useAuthStore();
+
+  if (isLoading || !role) {
+    return (
+      <div className="p-8 text-center">
+        <h1 className="text-2xl font-bold">Welcome to BanoQabil</h1>
+        <p className="text-muted-foreground mt-2">
+          {isLoading ? 'Loading your dashboard...' : 'Unable to determine your role. Please log out and try again, or contact admin.'}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <Suspense fallback={<PageLoader />}>
       {(role === 'Super Admin' || role === 'Admin') && <AdminDashboard />}
       {role === 'Teacher' && <TeacherDashboard />}
       {role === 'Student' && <StudentDashboard />}
-      {!role && (
-        <div className="p-8 text-center">
-          <h1 className="text-2xl font-bold">Welcome to BanoQabil</h1>
-          <p className="text-muted-foreground mt-2">Loading your dashboard...</p>
-        </div>
-      )}
     </Suspense>
   );
 }
@@ -85,25 +95,30 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <RoleDashboard /> },
 
-      // Admin & Super Admin
-      { path: 'approvals', element: <ProtectedRoute allowedRoles={['Super Admin','Admin']}><PendingApprovalsPage /></ProtectedRoute> },
-      { path: 'teachers', element: <ProtectedRoute allowedRoles={['Super Admin','Admin']}><Lazy><ManageTeachersPage /></Lazy></ProtectedRoute> },
-      { path: 'students', element: <ProtectedRoute allowedRoles={['Super Admin','Admin']}><Lazy><ManageStudentsPage /></Lazy></ProtectedRoute> },
-      { path: 'courses', element: <ProtectedRoute allowedRoles={['Super Admin','Admin']}><Lazy><CoursesPage /></Lazy></ProtectedRoute> },
-      { path: 'reports', element: <ProtectedRoute allowedRoles={['Super Admin','Admin']}><Lazy><ReportsPage /></Lazy></ProtectedRoute> },
-      { path: 'all-submissions', element: <ProtectedRoute allowedRoles={['Super Admin','Admin']}><Lazy><AllSubmissionsPage /></Lazy></ProtectedRoute> },
-      { path: 'all-assignments', element: <ProtectedRoute allowedRoles={['Super Admin','Admin']}><Lazy><AllAssignmentsPage /></Lazy></ProtectedRoute> },
-      { path: 'admins', element: <ProtectedRoute allowedRoles={['Super Admin']}><Lazy><ManageAdminsPage /></Lazy></ProtectedRoute> },
+      // Super Admin / Admin only
+      { path: 'approvals', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><PendingApprovalsPage /></ProtectedRoute> },
+      { path: 'teachers', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><Lazy><ManageTeachersPage /></Lazy></ProtectedRoute> },
+      { path: 'students', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><Lazy><ManageStudentsPage /></Lazy></ProtectedRoute> },
+      { path: 'courses', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><Lazy><CoursesPage /></Lazy></ProtectedRoute> },
+      { path: 'reports', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><Lazy><ReportsPage /></Lazy></ProtectedRoute> },
 
       // Teacher
+      // Assignments create/grade are teacher-only (not admin)
       { path: 'my-class', element: <ProtectedRoute allowedRoles={['Teacher']}><Lazy><MyClassPage /></Lazy></ProtectedRoute> },
+      { path: 'teacher-students', element: <ProtectedRoute allowedRoles={['Teacher']}><Lazy><TeacherStudentsPage /></Lazy></ProtectedRoute> },
       { path: 'assignments', element: <ProtectedRoute allowedRoles={['Teacher']}><Lazy><TeacherAssignmentsPage /></Lazy></ProtectedRoute> },
       { path: 'assignments/:assignmentId/grade', element: <ProtectedRoute allowedRoles={['Teacher']}><Lazy><GradeSubmissionsPage /></Lazy></ProtectedRoute> },
+      { path: 'attendance', element: <ProtectedRoute allowedRoles={['Teacher']}><Lazy><TeacherAttendancePage /></Lazy></ProtectedRoute> },
+      { path: 'notifications', element: <ProtectedRoute allowedRoles={['Teacher']}><Lazy><TeacherNotificationsPage /></Lazy></ProtectedRoute> },
       { path: 'progress', element: <ProtectedRoute allowedRoles={['Teacher']}><Lazy><StudentProgressPage /></Lazy></ProtectedRoute> },
 
       // Student
+      { path: 'my-profile', element: <ProtectedRoute allowedRoles={['Student']}><Lazy><StudentProfilePage /></Lazy></ProtectedRoute> },
+      { path: 'my-attendance', element: <ProtectedRoute allowedRoles={['Student']}><Lazy><StudentAttendancePage /></Lazy></ProtectedRoute> },
       { path: 'my-assignments', element: <ProtectedRoute allowedRoles={['Student']}><Lazy><StudentAssignmentsPage /></Lazy></ProtectedRoute> },
+      { path: 'my-submissions', element: <ProtectedRoute allowedRoles={['Student']}><Lazy><MySubmissionsPage /></Lazy></ProtectedRoute> },
       { path: 'my-grades', element: <ProtectedRoute allowedRoles={['Student']}><Lazy><MyGradesPage /></Lazy></ProtectedRoute> },
+      { path: 'my-notifications', element: <ProtectedRoute allowedRoles={['Student']}><Lazy><StudentNotificationsPage /></Lazy></ProtectedRoute> },
       { path: 'setup', element: <ProtectedRoute allowedRoles={['Student']}><Lazy><StudentSetupPage /></Lazy></ProtectedRoute> },
 
       // Shared

@@ -17,7 +17,7 @@ const PERMISSION_KEYS: { key: string; label: string }[] = [
   { key: 'can_approve_users',    label: 'Approve / Reject Users' },
   { key: 'can_manage_teachers',  label: 'Manage Teachers' },
   { key: 'can_manage_students',  label: 'Manage Students' },
-  { key: 'can_manage_courses',   label: 'Manage Courses & Batches' },
+  { key: 'can_manage_courses',   label: 'Manage Courses' },
   { key: 'can_assign_teachers',  label: 'Assign Teachers to Courses' },
   { key: 'can_view_reports',     label: 'View Reports' },
   { key: 'can_export_pdf',       label: 'Export PDF Reports' },
@@ -202,7 +202,7 @@ export default function ManageAdminsPage() {
                     <th className="text-left px-6 py-4 font-semibold">Email</th>
                     <th className="text-left px-6 py-4 font-semibold">Status</th>
                     <th className="text-left px-6 py-4 font-semibold">Permissions</th>
-                    <th className="text-left px-6 py-4 font-semibold text-right">Actions</th>
+                    <th className="px-6 py-4 text-right font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
