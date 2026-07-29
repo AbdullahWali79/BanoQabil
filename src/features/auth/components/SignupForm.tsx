@@ -15,6 +15,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { ensureStudentRow } from '@/features/teacher/utils/teacherData';
+import { generateUniqueApplicationId } from '@/lib/applicationId';
 
 const signupSchema = z.object({
   fullName: z.string().min(3, { message: 'Name must be at least 3 characters' }),
@@ -31,6 +32,7 @@ export function SignupForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [applicationId, setApplicationId] = useState<string | null>(null);
   const [studentRoleId, setStudentRoleId] = useState<string | null>(null);
   const [courses, setCourses] = useState<CourseOption[]>([]);
 
@@ -116,7 +118,12 @@ export function SignupForm() {
       }
 
       try {
-        await ensureStudentRow(authData.user.id, { course_id: data.courseId });
+        const appId = await generateUniqueApplicationId();
+        await ensureStudentRow(authData.user.id, {
+          course_id: data.courseId,
+          application_id: appId,
+        });
+        setApplicationId(appId);
       } catch (err: any) {
         // Non-fatal for signup success UI; admin can sync later
         console.warn('Student row create:', err?.message);
@@ -135,6 +142,12 @@ export function SignupForm() {
           Your student account is <strong className="text-foreground">Pending Approval</strong>.
           You will be able to log in once an admin approves your application.
         </p>
+        {applicationId ? (
+          <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+            Your Application ID:{' '}
+            <span className="font-mono font-semibold text-foreground">{applicationId}</span>
+          </p>
+        ) : null}
         <Button asChild className="mt-4 w-full">
           <Link to="/login">Go to Login</Link>
         </Button>

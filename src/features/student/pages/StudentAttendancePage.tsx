@@ -3,8 +3,7 @@ import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { CalendarCheck } from 'lucide-react';
-import { getStudentContext, type TeacherContact } from '@/features/student/utils/studentData';
-import { TeacherInfoCard } from '@/features/student/components/TeacherInfoCard';
+import { getStudentContext } from '@/features/student/utils/studentData';
 
 type AttendanceRow = {
   id: string;
@@ -25,9 +24,6 @@ function statusClass(status: string) {
 export default function StudentAttendancePage() {
   const { user } = useAuthStore();
   const [rows, setRows] = useState<AttendanceRow[]>([]);
-  const [teacher, setTeacher] = useState<TeacherContact | null>(null);
-  const [courseName, setCourseName] = useState('');
-  const [batchName, setBatchName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -38,9 +34,6 @@ export default function StudentAttendancePage() {
       setError('');
 
       const ctx = await getStudentContext(user.id);
-      setTeacher(ctx?.teacher ?? null);
-      setCourseName(ctx?.courseName || '');
-      setBatchName(ctx?.batchName || '');
 
       if (!ctx?.studentId) {
         setRows([]);
@@ -81,20 +74,13 @@ export default function StudentAttendancePage() {
   );
 
   return (
-    <div className="space-y-6 p-6 sm:p-8">
+    <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Attendance</h1>
         <p className="mt-1 text-muted-foreground">
-          Marked by your course teacher — percentage and day-wise history.
+          Marked by your course teacher â€” percentage and day-wise history.
         </p>
       </div>
-
-      <TeacherInfoCard
-        teacher={teacher}
-        courseName={courseName}
-        batchName={batchName}
-        compact
-      />
 
       {error ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -107,7 +93,7 @@ export default function StudentAttendancePage() {
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">Attendance %</p>
             <p className="mt-1 text-2xl font-bold">
-              {stats.pct == null ? '—' : `${stats.pct}%`}
+              {stats.pct == null ? 'â€”' : `${stats.pct}%`}
             </p>
           </CardContent>
         </Card>
@@ -201,7 +187,7 @@ export default function StudentAttendancePage() {
                           {r.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{r.notes || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{r.notes || 'â€”'}</td>
                     </tr>
                   ))
                 )}

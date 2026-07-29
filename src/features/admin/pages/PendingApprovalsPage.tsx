@@ -3,6 +3,8 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { UserCheck, UserX, ShieldCheck, Mail, Calendar, BookOpen } from 'lucide-react';
 import { ensureStudentRow, ensureTeacherRow, relationOne } from '@/features/teacher/utils/teacherData';
+import { useAuthStore } from '@/store/authStore';
+import { effectiveAppRole } from '@/lib/roles';
 
 type PendingUser = {
   id: string;
@@ -15,6 +17,9 @@ type PendingUser = {
 };
 
 export function PendingApprovalsPage() {
+  const { user, role } = useAuthStore();
+  const appRole = effectiveAppRole(user?.email, role);
+
   const [users, setUsers] = useState<PendingUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
@@ -23,6 +28,13 @@ export function PendingApprovalsPage() {
   const fetchPendingUsers = async () => {
     setIsLoading(true);
     setErrorMessage('');
+
+    // Admin: students only. Super Admin: teachers only.
+    const visibleForRole = (list: PendingUser[]) =>
+      appRole === 'Super Admin'
+        ? list.filter((u) => u.role === 'Teacher')
+        : list.filter((u) => u.role === 'Student');
+
     const { data, error } = await supabase
       .from('profiles')
       .select(`
@@ -49,18 +61,20 @@ export function PendingApprovalsPage() {
         setUsers([]);
       } else {
         setUsers(
-          (fallback.data ?? []).map((d: any) => {
-            const roleRel = relationOne<{ name?: string }>(d.roles);
-            return {
-              id: d.id,
-              full_name: d.full_name || 'Unknown User',
-              email: d.email,
-              role: roleRel?.name || 'Unknown',
-              created_at: new Date(d.created_at).toLocaleDateString(),
-              course_name: null,
-              course_id: null,
-            };
-          }),
+          visibleForRole(
+            (fallback.data ?? []).map((d: any) => {
+              const roleRel = relationOne<{ name?: string }>(d.roles);
+              return {
+                id: d.id,
+                full_name: d.full_name || 'Unknown User',
+                email: d.email,
+                role: roleRel?.name || 'Unknown',
+                created_at: new Date(d.created_at).toLocaleDateString(),
+                course_name: null,
+                course_id: null,
+              };
+            }),
+          ),
         );
       }
     } else {
@@ -81,22 +95,31 @@ export function PendingApprovalsPage() {
           course_id: studentRel?.course_id || null,
         };
       });
-      setUsers(mappedData);
+      setUsers(visibleForRole(mappedData));
     }
     setIsLoading(false);
   };
 
   useEffect(() => {
-    fetchPendingUsers();
-  }, []);
+    void fetchPendingUsers();
+  }, [appRole]);
 
   const handleAction = async (user: PendingUser, status: 'Approved' | 'Rejected') => {
+    const isTeacher = user.role === 'Teacher';
+    if (isTeacher && appRole !== 'Super Admin') {
+      setErrorMessage('Only Super Admin can approve/reject teacher accounts.');
+      return;
+    }
+
+    // Treat teacher "Rejected" as suspended, so rejected teachers don't retain access.
+    const desiredStatus = isTeacher && status === 'Rejected' ? 'Suspended' : status;
+
     setActionId(user.id);
     setErrorMessage('');
 
     const { error } = await supabase
       .from('profiles')
-      .update({ status })
+      .update({ status: desiredStatus })
       .eq('id', user.id);
 
     if (error) {
@@ -105,7 +128,7 @@ export function PendingApprovalsPage() {
       return;
     }
 
-    if (status === 'Approved') {
+    if (desiredStatus === 'Approved') {
       try {
         const role = user.role.toLowerCase();
         if (role === 'teacher') {
@@ -136,9 +159,11 @@ export function PendingApprovalsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Pending Approvals</h1>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Pending Approvals</h1>
         <p className="text-muted-foreground mt-2">
-          Review and approve or reject new student applications.
+          {appRole === 'Super Admin'
+            ? 'Review pending teacher registrations.'
+            : 'Review pending student registrations. Teacher approvals are handled by Super Admin.'}
         </p>
       </div>
 
@@ -205,7 +230,7 @@ export function PendingApprovalsPage() {
               <div className="bg-muted/50 p-4 border-t flex gap-3">
                 <Button
                   onClick={() => handleAction(user, 'Approved')}
-                  disabled={actionId === user.id}
+                  disabled={actionId === user.id || (user.role === 'Teacher' && appRole !== 'Super Admin')}
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                 >
                   <UserCheck size={16} className="mr-2" />
@@ -213,7 +238,7 @@ export function PendingApprovalsPage() {
                 </Button>
                 <Button
                   variant="outline"
-                  disabled={actionId === user.id}
+                  disabled={actionId === user.id || (user.role === 'Teacher' && appRole !== 'Super Admin')}
                   onClick={() => handleAction(user, 'Rejected')}
                   className="flex-1 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/20"
                 >

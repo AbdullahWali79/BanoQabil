@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { generateUniqueApplicationId } from '@/lib/applicationId';
 
 export type BatchRow = {
   id: string;
@@ -150,11 +151,15 @@ export async function ensureTeacherRow(profileId: string, specialization = 'Gene
 /** Ensure a students row exists for an approved student profile. */
 export async function ensureStudentRow(
   profileId: string,
-  extras?: { course_id?: string | null; batch_id?: string | null },
+  extras?: {
+    course_id?: string | null;
+    batch_id?: string | null;
+    application_id?: string | null;
+  },
 ) {
   const { data: existing } = await supabase
     .from('students')
-    .select('id, course_id')
+    .select('id, course_id, application_id')
     .eq('profile_id', profileId)
     .limit(1);
 
@@ -162,17 +167,26 @@ export async function ensureStudentRow(
     const patch: Record<string, unknown> = {};
     if (extras?.course_id && !existing[0].course_id) patch.course_id = extras.course_id;
     if (extras?.batch_id) patch.batch_id = extras.batch_id;
+    if (extras?.application_id?.trim() && !existing[0].application_id) {
+      patch.application_id = extras.application_id.trim();
+    } else if (!existing[0].application_id && !extras?.application_id) {
+      patch.application_id = await generateUniqueApplicationId();
+    }
     if (Object.keys(patch).length > 0) {
       await supabase.from('students').update(patch).eq('id', existing[0].id);
     }
     return existing[0].id;
   }
 
+  const applicationId =
+    extras?.application_id?.trim() || (await generateUniqueApplicationId());
+
   const { data, error } = await supabase
     .from('students')
     .insert({
       profile_id: profileId,
       enrollment_date: new Date().toISOString().slice(0, 10),
+      application_id: applicationId,
       ...(extras?.course_id ? { course_id: extras.course_id } : {}),
       ...(extras?.batch_id ? { batch_id: extras.batch_id } : {}),
     })

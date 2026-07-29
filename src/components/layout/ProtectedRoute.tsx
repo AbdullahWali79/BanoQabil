@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from 'react-router';
 import { useAuthStore } from '@/store/authStore';
+import { effectiveAppRole } from '@/lib/roles';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -8,6 +9,7 @@ interface ProtectedRouteProps {
 
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const { user, role, isLoading } = useAuthStore();
+  const appRole = effectiveAppRole(user?.email, role);
   const location = useLocation();
 
   if (isLoading) {
@@ -24,18 +26,22 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
 
   const { status } = useAuthStore.getState();
 
-  // If user is pending and trying to access anything other than /pending
+  // Account gating by status
   if (status === 'Pending' && location.pathname !== '/pending') {
     return <Navigate to="/pending" replace />;
   }
 
-  // If user is approved and trying to access /pending, redirect to dashboard
+  // Suspended / Rejected accounts should never access dashboards
+  if ((status === 'Suspended' || status === 'Rejected') && location.pathname !== '/unauthorized') {
+    return <Navigate to="/unauthorized" replace />;
+  }
+
+  // If approved accounts try to access /pending, redirect to dashboard
   if (status !== 'Pending' && location.pathname === '/pending') {
     return <Navigate to="/dashboard" replace />;
   }
 
-  // Wait for role before enforcing role-gated pages (avoids false 403 while resolving)
-  if (allowedRoles && !role) {
+  if (allowedRoles && !appRole) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
@@ -43,7 +49,7 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     );
   }
 
-  if (allowedRoles && role && !allowedRoles.includes(role)) {
+  if (allowedRoles && appRole && !allowedRoles.includes(appRole)) {
     return <Navigate to="/unauthorized" replace />;
   }
 

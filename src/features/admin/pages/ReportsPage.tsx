@@ -370,7 +370,7 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="reports-page min-h-full space-y-6 bg-gradient-to-b from-slate-50 to-background p-4 sm:p-6 lg:p-8">
+    <div className="reports-page min-h-full space-y-6">
       <div className="flex flex-col gap-4 rounded-2xl border bg-card/80 p-5 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">

@@ -5,8 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
 import { ensureStudentRow } from '@/features/teacher/utils/teacherData';
-import { getStudentContext, type TeacherContact } from '@/features/student/utils/studentData';
-import { TeacherInfoCard } from '@/features/student/components/TeacherInfoCard';
+import { getStudentContext } from '@/features/student/utils/studentData';
 
 type Course = {
   id: string;
@@ -39,7 +38,6 @@ export default function StudentSetupPage() {
   const [selectedCourseId, setSelectedCourseId] = useState('');
   const [selectedBatchId, setSelectedBatchId] = useState('');
   const [lockedByAdmin, setLockedByAdmin] = useState(false);
-  const [teacher, setTeacher] = useState<TeacherContact | null>(null);
   const [courseName, setCourseName] = useState('');
   const [batchName, setBatchName] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -51,7 +49,6 @@ export default function StudentSetupPage() {
       setMessage(null);
 
       const ctx = await getStudentContext(user.id);
-      setTeacher(ctx?.teacher ?? null);
       setCourseName(ctx?.courseName || '');
       setBatchName(ctx?.batchName || '');
 
@@ -151,7 +148,7 @@ export default function StudentSetupPage() {
 
   if (loading) {
     return (
-      <div className="space-y-4 p-6 sm:p-8">
+      <div className="space-y-4">
         <h1 className="text-3xl font-bold tracking-tight">My Course & Batch</h1>
         <Card>
           <CardContent className="p-8 text-center text-muted-foreground">
@@ -163,26 +160,24 @@ export default function StudentSetupPage() {
   }
 
   return (
-    <div className="space-y-6 p-6 sm:p-8">
+    <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">My Course & Batch</h1>
         <p className="mt-1 text-muted-foreground">
           {lockedByAdmin
-            ? 'Enrollment is managed by admin. You can view your class and teacher here.'
-            : 'If admin has not assigned you yet, select your course/batch once — then it locks.'}
+            ? 'Enrollment is managed by admin. You can view your class here.'
+            : 'If admin has not assigned you yet, select your course/batch once â€” then it locks.'}
         </p>
       </div>
-
-      <TeacherInfoCard teacher={teacher} courseName={courseName} batchName={batchName} />
 
       {lockedByAdmin ? (
         <Card className="border-emerald-200 bg-emerald-50/50">
           <CardContent className="space-y-3 p-6">
             <p className="font-semibold text-emerald-950">You are enrolled</p>
             <p className="text-sm text-emerald-900/80">
-              Course: <strong>{courseName || '—'}</strong>
+              Course: <strong>{courseName || 'â€”'}</strong>
               <br />
-              Batch: <strong>{batchName || '—'}</strong>
+              Batch: <strong>{batchName || 'â€”'}</strong>
             </p>
             <div className="flex flex-wrap gap-2 pt-1">
               <Button asChild size="sm">

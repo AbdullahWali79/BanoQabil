@@ -5,8 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Search, Upload } from 'lucide-react';
 import { relationOne } from '@/features/teacher/utils/teacherData';
-import { getStudentContext, type TeacherContact } from '@/features/student/utils/studentData';
-import { TeacherInfoCard } from '@/features/student/components/TeacherInfoCard';
+import { getStudentContext } from '@/features/student/utils/studentData';
 
 type SubmissionRecord = {
   id: string;
@@ -27,7 +26,6 @@ export default function MySubmissionsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
-  const [teacher, setTeacher] = useState<TeacherContact | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
@@ -37,7 +35,6 @@ export default function MySubmissionsPage() {
       setErrorMessage('');
 
       const ctx = await getStudentContext(user.id);
-      setTeacher(ctx?.teacher ?? null);
 
       if (!ctx?.studentId) {
         setErrorMessage('Student profile not found. Please contact admin to complete your setup.');
@@ -75,15 +72,13 @@ export default function MySubmissionsPage() {
   );
 
   return (
-    <div className="p-6 sm:p-8 space-y-6">
+    <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">My Submissions</h1>
         <p className="mt-1 text-muted-foreground">
-          History of work you sent to your teacher — including marks once graded.
+          History of work you sent to your teacher â€” including marks once graded.
         </p>
       </div>
-
-      <TeacherInfoCard teacher={teacher} compact />
 
       <Card>
         <CardContent className="p-0">
@@ -152,7 +147,7 @@ export default function MySubmissionsPage() {
                         <td className="px-6 py-4 font-semibold">
                           {item.marks != null ? `${item.marks} / 100` : 'Awaiting marks'}
                         </td>
-                        <td className="px-6 py-4 text-muted-foreground">{item.remarks || '—'}</td>
+                        <td className="px-6 py-4 text-muted-foreground">{item.remarks || 'â€”'}</td>
                         <td className="px-6 py-4">
                           <div className="flex flex-wrap gap-2">
                             {item.youtube_url && (

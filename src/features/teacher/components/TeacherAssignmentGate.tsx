@@ -57,5 +57,5 @@ export function TeacherAssignmentGate({ courseName, genderScope, soft, children 
     );
   }
 
-  return <div className="p-6 sm:p-8">{banner}</div>;
+  return <div>{banner}</div>;
 }

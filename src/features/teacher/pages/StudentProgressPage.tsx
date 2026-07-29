@@ -302,15 +302,15 @@ export default function StudentProgressPage() {
         return {
           student_id: student.id,
             student_name: profile?.full_name || 'Unknown Student',
-            email: profile?.email || '—',
-            phone: profile?.phone || '—',
+            email: profile?.email || 'â€”',
+            phone: profile?.phone || 'â€”',
             application_id: student.application_id || '',
             batch: student.batch_id
               ? batchNameMap[student.batch_id] ||
                 cleanBatchDisplayName(batch?.name) ||
-                '—'
+                'â€”'
               : cleanBatchDisplayName(batch?.name),
-            course: course?.name || courseName || '—',
+            course: course?.name || courseName || 'â€”',
             assigned: batchAssignments.length,
           submitted: studentSubs.length,
           graded: graded.length,
@@ -411,12 +411,12 @@ export default function StudentProgressPage() {
 
   return (
     <TeacherAssignmentGate courseName={courseName} genderScope={genderScope}>
-      <div className="space-y-6 p-6 sm:p-8">
+      <div className="space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Student Progress</h1>
             <p className="mt-1 text-muted-foreground">
-              Every student in your class — assignment marks, attendance %, and absent days.
+              Every student in your class â€” assignment marks, attendance %, and absent days.
               Click <span className="font-medium text-foreground">View</span> for full detail.
             </p>
         </div>
@@ -452,7 +452,7 @@ export default function StudentProgressPage() {
                   const vals = rows
                     .map((r) => r.avg_marks)
                     .filter((v): v is number => v != null);
-                  if (!vals.length) return '—';
+                  if (!vals.length) return 'â€”';
                   return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
                 })()}
               </p>
@@ -466,7 +466,7 @@ export default function StudentProgressPage() {
                   const vals = rows
                     .map((r) => r.attendance_pct)
                     .filter((v): v is number => v != null);
-                  if (!vals.length) return '—';
+                  if (!vals.length) return 'â€”';
                   return `${Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)}%`;
                 })()}
               </p>
@@ -524,16 +524,16 @@ export default function StudentProgressPage() {
                         <div className="text-xs text-muted-foreground">{row.email}</div>
                       </td>
                             <td className="px-3 py-3 font-mono text-xs">
-                              {row.application_id || '—'}
+                              {row.application_id || 'â€”'}
                             </td>
                             <td className="px-3 py-3">{row.assigned}</td>
                             <td className="px-3 py-3">{row.submitted}</td>
                             <td className="px-3 py-3">{row.graded}</td>
                             <td className={`px-3 py-3 ${marksClass(row.avg_marks)}`}>
-                              {row.avg_marks != null ? `${row.avg_marks}/100` : '—'}
+                              {row.avg_marks != null ? `${row.avg_marks}/100` : 'â€”'}
                             </td>
                             <td className="px-3 py-3 font-semibold">
-                              {row.attendance_pct == null ? '—' : `${row.attendance_pct}%`}
+                              {row.attendance_pct == null ? 'â€”' : `${row.attendance_pct}%`}
                             </td>
                             <td className="px-3 py-3">
                               <span
@@ -568,7 +568,7 @@ export default function StudentProgressPage() {
               {filteredRows.length > PAGE_SIZE ? (
                 <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-muted-foreground">
-                    {(currentPage - 1) * PAGE_SIZE + 1}–
+                    {(currentPage - 1) * PAGE_SIZE + 1}â€“
                     {Math.min(currentPage * PAGE_SIZE, filteredRows.length)} of{' '}
                     {filteredRows.length}
                   </p>
@@ -626,10 +626,10 @@ export default function StudentProgressPage() {
                         {selected.student_name}
                       </h2>
                       <p className="mt-1 break-all text-sm text-muted-foreground">
-                        App ID: {selected.application_id || '—'} · {selected.email}
+                        App ID: {selected.application_id || 'â€”'} Â· {selected.email}
                       </p>
                       <p className="mt-0.5 text-sm text-muted-foreground">
-                        {selected.course} · {selected.batch}
+                        {selected.course} Â· {selected.batch}
                       </p>
                     </div>
                     <Button
@@ -649,14 +649,14 @@ export default function StudentProgressPage() {
                       <div className="rounded-xl border bg-muted/30 p-3">
                         <p className="text-xs text-muted-foreground">Avg marks</p>
                         <p className={`mt-1 text-xl font-bold ${marksClass(selected.avg_marks)}`}>
-                          {selected.avg_marks != null ? `${selected.avg_marks}/100` : '—'}
+                          {selected.avg_marks != null ? `${selected.avg_marks}/100` : 'â€”'}
                         </p>
                       </div>
                       <div className="rounded-xl border bg-muted/30 p-3">
                         <p className="text-xs text-muted-foreground">Attendance</p>
                         <p className="mt-1 text-xl font-bold">
                           {selected.attendance_pct == null
-                            ? '—'
+                            ? 'â€”'
                             : `${selected.attendance_pct}%`}
                         </p>
                       </div>
@@ -699,7 +699,7 @@ export default function StudentProgressPage() {
                                     Due{' '}
                                     {a.due_date
                                       ? new Date(a.due_date).toLocaleDateString()
-                                      : '—'}
+                                      : 'â€”'}
                                   </p>
                                 </div>
                                 <div className="shrink-0 sm:text-right">
@@ -760,8 +760,8 @@ export default function StudentProgressPage() {
                         Attendance detail
                       </h3>
                       <p className="mb-3 text-xs text-muted-foreground">
-                        Total days recorded: {selected.total_attendance_days} · Late:{' '}
-                        {selected.late_days} · Excused: {selected.excused_days}
+                        Total days recorded: {selected.total_attendance_days} Â· Late:{' '}
+                        {selected.late_days} Â· Excused: {selected.excused_days}
                       </p>
 
                       <div className="mb-3">

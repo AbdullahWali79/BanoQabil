@@ -6,7 +6,14 @@ import { Input } from '@/components/ui/input';
 import { BookOpen, Plus, X } from 'lucide-react';
 import { cleanBatchDisplayName, relationOne } from '@/features/teacher/utils/teacherData';
 
-type Course = { id: string; name: string; description: string | null };
+type Course = {
+  id: string;
+  name: string;
+  description: string | null;
+  initial_fee?: number | null;
+  monthly_fee?: number | null;
+  is_free?: boolean | null;
+};
 type TeacherOption = { id: string; name: string };
 type Batch = {
   id: string;
@@ -40,7 +47,13 @@ export default function CoursesPage() {
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
   const [saving, setSaving] = useState(false);
-  const [courseForm, setCourseForm] = useState({ name: '', description: '' });
+  const [courseForm, setCourseForm] = useState({
+    name: '',
+    description: '',
+    initial_fee: '',
+    monthly_fee: '',
+    is_free: false,
+  });
   const [batchForm, setBatchForm] = useState({
     name: '',
     course_id: '',
@@ -128,14 +141,26 @@ export default function CoursesPage() {
 
   const openCreateCourse = () => {
     setEditingCourse(null);
-    setCourseForm({ name: '', description: '' });
+    setCourseForm({
+      name: '',
+      description: '',
+      initial_fee: '',
+      monthly_fee: '',
+      is_free: false,
+    });
     setShowCourseForm(true);
     setShowBatchForm(false);
   };
 
   const openEditCourse = (course: Course) => {
     setEditingCourse(course);
-    setCourseForm({ name: course.name, description: course.description || '' });
+    setCourseForm({
+      name: course.name,
+      description: course.description || '',
+      initial_fee: course.initial_fee != null ? String(course.initial_fee) : '',
+      monthly_fee: course.monthly_fee != null ? String(course.monthly_fee) : '',
+      is_free: Boolean(course.is_free),
+    });
     setShowCourseForm(true);
     setShowBatchForm(false);
   };
@@ -147,21 +172,37 @@ export default function CoursesPage() {
     setErrorMessage('');
     setSuccessMessage('');
 
+    const isFree = courseForm.is_free;
+    const initialFee = isFree
+      ? 0
+      : courseForm.initial_fee.trim() === ''
+        ? 0
+        : Number(courseForm.initial_fee);
+    const monthlyFee = isFree
+      ? 0
+      : courseForm.monthly_fee.trim() === ''
+        ? 0
+        : Number(courseForm.monthly_fee);
+    if (Number.isNaN(initialFee) || Number.isNaN(monthlyFee) || initialFee < 0 || monthlyFee < 0) {
+      setErrorMessage('Fees must be valid numbers (0 or more).');
+      setSaving(false);
+      return;
+    }
+
+    const payload = {
+      name: courseForm.name.trim(),
+      description: courseForm.description.trim() || null,
+      initial_fee: initialFee,
+      monthly_fee: monthlyFee,
+      is_free: isFree,
+    };
+
     if (editingCourse) {
-      const { error } = await supabase
-        .from('courses')
-        .update({
-          name: courseForm.name.trim(),
-          description: courseForm.description.trim() || null,
-        })
-        .eq('id', editingCourse.id);
+      const { error } = await supabase.from('courses').update(payload).eq('id', editingCourse.id);
       if (error) setErrorMessage(error.message);
       else setSuccessMessage('Course updated.');
     } else {
-      const { error } = await supabase.from('courses').insert({
-        name: courseForm.name.trim(),
-        description: courseForm.description.trim() || null,
-      });
+      const { error } = await supabase.from('courses').insert(payload);
       if (error) setErrorMessage(error.message);
       else setSuccessMessage('Course created.');
     }
@@ -251,10 +292,10 @@ export default function CoursesPage() {
   };
 
   return (
-    <div className="p-6 sm:p-8 space-y-6">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Courses & Batches</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Courses & Batches</h1>
           <p className="mt-1 text-muted-foreground">
             Manage courses, batches, and teacher assignments.
           </p>
@@ -310,6 +351,54 @@ export default function CoursesPage() {
                 value={courseForm.description}
                 onChange={(e) => setCourseForm((f) => ({ ...f, description: e.target.value }))}
               />
+              <label className="flex cursor-pointer items-center gap-2 rounded-md border bg-muted/30 px-3 py-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border"
+                  checked={courseForm.is_free}
+                  onChange={(e) =>
+                    setCourseForm((f) => ({
+                      ...f,
+                      is_free: e.target.checked,
+                      ...(e.target.checked ? { initial_fee: '0', monthly_fee: '0' } : {}),
+                    }))
+                  }
+                />
+                <span>
+                  <span className="font-medium">Free course</span>
+                  <span className="ml-1 text-muted-foreground">
+                    (no initial or monthly fee)
+                  </span>
+                </span>
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Initial Fee (Rs)</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="e.g. 5000"
+                    disabled={courseForm.is_free}
+                    value={courseForm.initial_fee}
+                    onChange={(e) =>
+                      setCourseForm((f) => ({ ...f, initial_fee: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Monthly Fee (Rs)</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="e.g. 3000"
+                    disabled={courseForm.is_free}
+                    value={courseForm.monthly_fee}
+                    onChange={(e) =>
+                      setCourseForm((f) => ({ ...f, monthly_fee: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
               <div className="flex justify-end">
                 <Button type="submit" disabled={saving}>
                   {saving ? 'Saving...' : 'Save Course'}
@@ -429,6 +518,18 @@ export default function CoursesPage() {
                         <CardTitle className="text-xl">{course.name}</CardTitle>
                         <p className="mt-1 text-sm text-muted-foreground">
                           {course.description || 'No description'}
+                        </p>
+                        <p className="mt-1 text-sm font-medium text-foreground">
+                          {course.is_free ? (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                              Free course
+                            </span>
+                          ) : (
+                            <>
+                              Initial Rs {Number(course.initial_fee ?? 0).toLocaleString()} · Monthly
+                              Rs {Number(course.monthly_fee ?? 0).toLocaleString()}
+                            </>
+                          )}
                         </p>
                         <p className="mt-1 text-sm text-muted-foreground">
                           {courseBatches.length} batch{courseBatches.length === 1 ? '' : 'es'} ·{' '}

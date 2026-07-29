@@ -104,9 +104,9 @@ function extractBatchCode(fileName, trainerCell) {
 function parseAttendanceStudents(rows) {
   const students = [];
   let cur = null;
-  for (let i = 3; i < rows.length; i++) {
+  for (let i = 0; i < rows.length; i++) {
     const sr = rows[i][0];
-    const c = String(rows[i][1] || '').trim();
+    const c = String(rows[i][1] ?? '').trim();
     if (!c) continue;
 
     const isSr = sr !== '' && sr != null && !Number.isNaN(Number(sr));
@@ -339,20 +339,20 @@ async function main() {
     g.teacherEmail = email;
   }
 
-  console.log('\n=== Assign ONE course per teacher ===');
-  // Clear and reinsert
-  for (const teacher of teachers || []) {
-    await api('DELETE', `/rest/v1/teacher_courses?teacher_id=eq.${teacher.id}`, {
-      token,
-      prefer: 'return=minimal',
-    });
-  }
+  console.log('\n=== Ensure teacher ↔ course links (no wipe) ===');
   for (const [teacherId, courseId] of teacherCoursePlan.entries()) {
-    await api('POST', '/rest/v1/teacher_courses', {
-      token,
-      body: { teacher_id: teacherId, course_id: courseId },
-      prefer: 'return=minimal',
-    });
+    const existingLink = await api(
+      'GET',
+      `/rest/v1/teacher_courses?select=id&teacher_id=eq.${teacherId}&course_id=eq.${courseId}`,
+      { token },
+    );
+    if (!existingLink?.[0]) {
+      await api('POST', '/rest/v1/teacher_courses', {
+        token,
+        body: { teacher_id: teacherId, course_id: courseId },
+        prefer: 'return=minimal',
+      });
+    }
     console.log(`  ${teacherCourseName.get(teacherId)} ← teacher ${teacherId.slice(0, 8)}…`);
   }
 
@@ -374,6 +374,7 @@ async function main() {
   const usedEmails = new Set([...profileByEmail.keys()]);
 
   let created = 0;
+  let linked = 0;
   let skipped = 0;
   let failed = 0;
 
@@ -449,8 +450,46 @@ async function main() {
         skipped += 1;
         continue;
       }
+
+      // Already seeded by application_id → still ensure CIT course/batch/gender
       if (existingAppIds.has(appId)) {
-        skipped += 1;
+        try {
+          const existingByApp = await api(
+            'GET',
+            `/rest/v1/students?select=id,profile_id&application_id=eq.${encodeURIComponent(appId)}`,
+            { token },
+          );
+          const row = existingByApp?.[0];
+          if (row?.id) {
+            await api('PATCH', `/rest/v1/students?id=eq.${row.id}`, {
+              token,
+              body: {
+                course_id: g.courseId,
+                batch_id: batchId,
+                application_id: appId,
+                ...(g.gender ? { gender: g.gender } : {}),
+              },
+              prefer: 'return=minimal',
+            });
+            if (student.phone && row.profile_id) {
+              await api('PATCH', `/rest/v1/profiles?id=eq.${row.profile_id}`, {
+                token,
+                body: {
+                  full_name: student.name,
+                  phone: student.phone || null,
+                  status: 'Approved',
+                },
+                prefer: 'return=minimal',
+              });
+            }
+            linked += 1;
+          } else {
+            skipped += 1;
+          }
+        } catch (err) {
+          failed += 1;
+          console.error(`  LINK FAIL ${student.name} (${appId}): ${err.message}`);
+        }
         continue;
       }
 
@@ -593,7 +632,8 @@ async function main() {
 
   console.log('\n=== DONE ===');
   console.log(`Created/updated: ${created}`);
-  console.log(`Skipped (already exist / empty): ${skipped}`);
+  console.log(`Linked existing → course/batch: ${linked}`);
+  console.log(`Skipped (empty): ${skipped}`);
   console.log(`Failed: ${failed}`);
   console.log('\nLogin rule: email = name@gmail.com (or name.id@gmail.com if duplicate)');
   console.log('Password = Application ID from sheet');

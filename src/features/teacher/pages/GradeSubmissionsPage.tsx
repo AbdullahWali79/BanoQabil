@@ -174,10 +174,10 @@ export default function GradeSubmissionsPage() {
   };
 
   return (
-    <div className="space-y-6 p-6 sm:p-8">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
           <p className="mt-1 text-muted-foreground">
             Only you (course teacher) can award marks. Students see scores after you save.
             {batchLabel ? ` · ${batchLabel}` : ''}
@@ -203,7 +203,8 @@ export default function GradeSubmissionsPage() {
       {forbidden ? null : (
         <>
           <div className="overflow-hidden rounded-lg border bg-card shadow-sm">
-            <table className="w-full text-left text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="border-b bg-muted/40 text-xs uppercase">
                 <tr>
                   <th className="px-4 py-4">SR#</th>
@@ -289,10 +290,11 @@ export default function GradeSubmissionsPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
 
-          <div className="flex justify-end">
-            <Button onClick={handleSaveAll} disabled={saving || rows.length === 0 || loading}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button onClick={handleSaveAll} disabled={saving || rows.length === 0 || loading} className="w-full sm:w-auto">
               {saving ? 'Saving...' : 'Save All Marks'}
             </Button>
           </div>

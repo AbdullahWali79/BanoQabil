@@ -23,6 +23,26 @@ export async function adminSetUserPassword(userId: string, password: string) {
   return data;
 }
 
+/** Admin updates another user's login email (Auth + profiles). */
+export async function adminSetUserEmail(userId: string, email: string) {
+  const { data, error } = await supabase.functions.invoke('admin-set-password', {
+    body: { userId, email },
+  });
+
+  if (error) {
+    throw new Error(
+      error.message ||
+        'Email update API unavailable. Redeploy edge function admin-set-password.',
+    );
+  }
+
+  if (data?.error) {
+    throw new Error(String(data.error));
+  }
+
+  return data;
+}
+
 /** Always-available fallback: email the teacher a reset link */
 export async function sendTeacherPasswordResetEmail(email: string) {
   const redirectTo = `${window.location.origin}/login`;

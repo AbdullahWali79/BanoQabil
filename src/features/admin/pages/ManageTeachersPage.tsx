@@ -18,8 +18,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ensureTeacherRow, relationOne, setTeacherCourseAssignment, type GenderScope } from '@/features/teacher/utils/teacherData';
 import {
   adminSetUserPassword,
+  adminSetUserEmail,
   sendTeacherPasswordResetEmail,
 } from '@/lib/adminPassword';
+import { useAuthStore } from '@/store/authStore';
+import { effectiveAppRole } from '@/lib/roles';
 
 type TeacherRow = {
   id: string;
@@ -77,7 +80,7 @@ const emptyForm: TeacherForm = {
   address: '',
   trainer_code: '',
   specialization: '',
-  status: 'Approved',
+  status: 'Pending',
   password: '',
   confirmPassword: '',
 };
@@ -115,10 +118,19 @@ function FieldLabel({
 type CourseOption = { id: string; name: string };
 
 export default function ManageTeachersPage() {
+  const { user, role } = useAuthStore();
+  const appRole = effectiveAppRole(user?.email, role);
+  const canChangeTeacherStatus = appRole === 'Super Admin';
+  /** Super Admin only: edit teacher username/email and delete teachers */
+  const canEditTeacherCredentials = appRole === 'Super Admin';
+  const canDeleteTeacher = appRole === 'Super Admin';
+
   const [teachers, setTeachers] = useState<TeacherRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'All' | 'Approved' | 'Suspended' | 'Pending'>('All');
+  const [statusFilter, setStatusFilter] = useState<
+    'All' | 'Approved' | 'Suspended' | 'Pending' | 'Rejected'
+  >('All');
   const [genderFilter, setGenderFilter] = useState<'All' | GenderScope | 'None'>('All');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editing, setEditing] = useState<TeacherRow | null>(null);
@@ -450,18 +462,23 @@ export default function ManageTeachersPage() {
     return null;
   };
 
-  const teacherPayload = (data: TeacherForm) => ({
-    username: data.username.trim(),
-    cnic: data.cnic.trim(),
-    province: data.province.trim(),
-    region: data.region.trim(),
-    district: data.district.trim(),
-    city: data.city.trim(),
-    experience: data.experience.trim() || null,
-    address: data.address.trim() || null,
-    trainer_code: data.trainer_code.trim() || null,
-    specialization: data.specialization.trim() || null,
-  });
+  const teacherPayload = (data: TeacherForm, includeUsername: boolean) => {
+    const payload: Record<string, string | null> = {
+      cnic: data.cnic.trim(),
+      province: data.province.trim(),
+      region: data.region.trim(),
+      district: data.district.trim(),
+      city: data.city.trim(),
+      experience: data.experience.trim() || null,
+      address: data.address.trim() || null,
+      trainer_code: data.trainer_code.trim() || null,
+      specialization: data.specialization.trim() || null,
+    };
+    if (includeUsername) {
+      payload.username = data.username.trim();
+    }
+    return payload;
+  };
 
   const openAdd = () => {
     setForm(emptyForm);
@@ -587,17 +604,28 @@ export default function ManageTeachersPage() {
     setMessage(null);
 
     const profileId = editing.profiles.id;
+    const nextEmail = form.email.trim().toLowerCase();
+    const prevEmail = (editing.profiles.email || '').trim().toLowerCase();
+    const emailChanged = canEditTeacherCredentials && nextEmail && nextEmail !== prevEmail;
+
+    const profileUpdate: Record<string, string | null> = {
+      full_name: form.full_name.trim(),
+      phone: form.phone.trim(),
+      address: form.address.trim() || null,
+      status: canChangeTeacherStatus
+        ? form.status
+        : (editing.profiles?.status ?? 'Pending'),
+    };
+    if (canEditTeacherCredentials) {
+      profileUpdate.email = nextEmail;
+    }
+
     const [{ error: profileError }, { error: teacherError }] = await Promise.all([
+      supabase.from('profiles').update(profileUpdate).eq('id', profileId),
       supabase
-        .from('profiles')
-        .update({
-          full_name: form.full_name.trim(),
-          phone: form.phone.trim(),
-          address: form.address.trim() || null,
-          status: form.status,
-        })
-        .eq('id', profileId),
-      supabase.from('teachers').update(teacherPayload(form)).eq('id', editing.id),
+        .from('teachers')
+        .update(teacherPayload(form, canEditTeacherCredentials))
+        .eq('id', editing.id),
     ]);
 
     if (profileError || teacherError) {
@@ -607,6 +635,22 @@ export default function ManageTeachersPage() {
       });
       setSaving(false);
       return;
+    }
+
+    if (emailChanged) {
+      try {
+        await adminSetUserEmail(profileId, nextEmail);
+      } catch (err: any) {
+        setMessage({
+          type: 'error',
+          text:
+            err?.message ||
+            'Teacher saved, but login email update failed. Redeploy admin-set-password.',
+        });
+        setSaving(false);
+        await fetchTeachers();
+        return;
+      }
     }
 
     try {
@@ -628,21 +672,53 @@ export default function ManageTeachersPage() {
     await fetchTeachers();
   };
 
-  const setStatus = async (teacher: TeacherRow, status: 'Approved' | 'Suspended') => {
+  const setStatus = async (
+    teacher: TeacherRow,
+    status: 'Approved' | 'Suspended' | 'Pending' | 'Rejected',
+  ) => {
+    if (!canChangeTeacherStatus) {
+      setMessage({ type: 'error', text: 'Only Super Admin can approve/reject/suspend teachers.' });
+      return;
+    }
     const profileId = teacher.profiles?.id;
     if (!profileId) return;
-    const label = status === 'Suspended' ? 'suspend' : 'activate';
-    if (!confirm(`Are you sure you want to ${label} ${teacher.profiles.full_name}?`)) return;
+    if (teacher.profiles.status === status) return;
+    if (!confirm(`Change status of ${teacher.profiles.full_name} to ${status}?`)) return;
 
     const { error } = await supabase.from('profiles').update({ status }).eq('id', profileId);
     if (error) {
       setMessage({ type: 'error', text: error.message });
       return;
     }
-    setMessage({
-      type: 'success',
-      text: status === 'Suspended' ? 'Teacher suspended.' : 'Teacher activated.',
-    });
+    setMessage({ type: 'success', text: `Teacher status set to ${status}.` });
+    await fetchTeachers();
+  };
+
+  const deleteTeacher = async (teacher: TeacherRow) => {
+    if (!canDeleteTeacher) {
+      setMessage({ type: 'error', text: 'Only Super Admin can delete teachers.' });
+      return;
+    }
+    const name = teacher.profiles?.full_name || teacher.username || 'this teacher';
+    if (
+      !confirm(
+        `Delete teacher "${name}"?\n\nThis removes their teacher record and suspends the account. Auth login may still exist.`,
+      )
+    ) {
+      return;
+    }
+
+    const profileId = teacher.profiles?.id;
+    await supabase.from('teacher_courses').delete().eq('teacher_id', teacher.id);
+    const { error: delError } = await supabase.from('teachers').delete().eq('id', teacher.id);
+    if (delError) {
+      setMessage({ type: 'error', text: delError.message });
+      return;
+    }
+    if (profileId) {
+      await supabase.from('profiles').update({ status: 'Suspended' }).eq('id', profileId);
+    }
+    setMessage({ type: 'success', text: 'Teacher deleted and account suspended.' });
     await fetchTeachers();
   };
 
@@ -704,7 +780,7 @@ export default function ManageTeachersPage() {
         phone: form.phone.trim(),
         address: form.address.trim() || null,
         role_id: teacherRoleId,
-        status: 'Approved' as const,
+        status: canChangeTeacherStatus ? 'Approved' : 'Pending',
       };
 
       if (existingProfile?.[0]) {
@@ -719,7 +795,7 @@ export default function ManageTeachersPage() {
 
       const { error: teacherUpdateError } = await supabase
         .from('teachers')
-        .update(teacherPayload(form))
+        .update(teacherPayload(form, true))
         .eq('profile_id', userId);
 
       if (teacherUpdateError) throw new Error(teacherUpdateError.message);
@@ -736,7 +812,9 @@ export default function ManageTeachersPage() {
 
       setMessage({
         type: 'success',
-        text: `Teacher "${form.full_name.trim()}" added. Login email: ${form.email.trim()} (password set by admin).`,
+        text: canChangeTeacherStatus
+          ? `Teacher "${form.full_name.trim()}" added and activated. Login email: ${form.email.trim()} (password set by admin).`
+          : `Teacher "${form.full_name.trim()}" added. Approval pending by Super Admin. Login email: ${form.email.trim()} (password set by admin).`,
       });
       setForm(emptyForm);
       setUseUsernameAsPassword(false);
@@ -844,7 +922,7 @@ export default function ManageTeachersPage() {
     if (status === 'Approved') {
       return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
     }
-    if (status === 'Suspended') {
+    if (status === 'Suspended' || status === 'Rejected') {
       return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
     }
     return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
@@ -875,8 +953,11 @@ export default function ManageTeachersPage() {
             }}
             placeholder="e.g. ashmira.majeed"
             required
-            disabled={mode === 'edit'}
+            disabled={mode === 'edit' && !canEditTeacherCredentials}
           />
+          {mode === 'edit' && !canEditTeacherCredentials ? (
+            <p className="text-xs text-muted-foreground">Only Super Admin can edit username.</p>
+          ) : null}
         </div>
         <div className="space-y-2">
           <FieldLabel required>Trainer Email Address</FieldLabel>
@@ -886,8 +967,11 @@ export default function ManageTeachersPage() {
             onChange={(e) => setField('email', e.target.value)}
             placeholder="email@example.com"
             required
-            disabled={mode === 'edit'}
+            disabled={mode === 'edit' && !canEditTeacherCredentials}
           />
+          {mode === 'edit' && !canEditTeacherCredentials ? (
+            <p className="text-xs text-muted-foreground">Only Super Admin can edit email.</p>
+          ) : null}
         </div>
 
         {mode === 'add' && (
@@ -1025,7 +1109,7 @@ export default function ManageTeachersPage() {
             placeholder="Full address"
           />
         </div>
-        {mode === 'edit' && (
+        {mode === 'edit' && canChangeTeacherStatus && (
           <div className="space-y-2">
             <FieldLabel>Status</FieldLabel>
             <select
@@ -1034,8 +1118,9 @@ export default function ManageTeachersPage() {
               onChange={(e) => setField('status', e.target.value)}
             >
               <option value="Approved">Approved</option>
-              <option value="Suspended">Suspended</option>
               <option value="Pending">Pending</option>
+              <option value="Suspended">Suspended</option>
+              <option value="Rejected">Rejected</option>
             </select>
           </div>
         )}
@@ -1045,12 +1130,14 @@ export default function ManageTeachersPage() {
   );
 
   return (
-    <div className="p-6 sm:p-8 space-y-6">
+    <div className="space-y-6">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Manage Teachers</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Manage Teachers</h1>
           <p className="text-muted-foreground mt-1">
-            Course + who they teach (Male / Female / Both) — clearly visible for every trainer.
+            {canChangeTeacherStatus
+              ? 'All teachers — edit username/email, change status, or delete (Super Admin).'
+              : 'Course + who they teach (Male / Female / Both). Teacher status is managed by Super Admin.'}
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -1146,6 +1233,7 @@ export default function ManageTeachersPage() {
                 <option value="Approved">Approved</option>
                 <option value="Suspended">Suspended</option>
                 <option value="Pending">Pending</option>
+                <option value="Rejected">Rejected</option>
               </select>
             </div>
           </div>
@@ -1238,7 +1326,7 @@ export default function ManageTeachersPage() {
                           </span>
                         </td>
                         <td className="px-4 py-4 text-right">
-                          <div className="flex justify-end gap-1">
+                          <div className="flex justify-end gap-1 items-center flex-wrap">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -1257,27 +1345,35 @@ export default function ManageTeachersPage() {
                             >
                               <KeyRound className="w-4 h-4" />
                             </Button>
-                            {t.profiles.status === 'Suspended' ? (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-green-600"
-                                title="Activate"
-                                onClick={() => setStatus(t, 'Approved')}
+                            {canChangeTeacherStatus ? (
+                              <select
+                                className="h-8 max-w-[120px] rounded-md border bg-background px-2 text-xs"
+                                value={t.profiles.status || 'Pending'}
+                                title="Change status"
+                                onChange={(e) =>
+                                  setStatus(
+                                    t,
+                                    e.target.value as 'Approved' | 'Pending' | 'Suspended' | 'Rejected',
+                                  )
+                                }
                               >
-                                <UserCheck className="w-4 h-4" />
-                              </Button>
-                            ) : (
+                                <option value="Approved">Approved</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Suspended">Suspended</option>
+                                <option value="Rejected">Rejected</option>
+                              </select>
+                            ) : null}
+                            {canDeleteTeacher ? (
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-destructive"
-                                title="Suspend"
-                                onClick={() => setStatus(t, 'Suspended')}
+                                title="Delete teacher"
+                                onClick={() => deleteTeacher(t)}
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>
-                            )}
+                            ) : null}
                           </div>
                         </td>
                       </tr>

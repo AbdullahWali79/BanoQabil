@@ -69,6 +69,11 @@ create table if not exists public.students (
   unique (profile_id)
 );
 
+-- Unique Application IDs (password / lookup key). See also sql/application_id_unique.sql
+create unique index if not exists students_application_id_unique
+  on public.students (lower(btrim(application_id)))
+  where application_id is not null and btrim(application_id) <> '';
+
 create table if not exists public.assignments (
   id uuid primary key default gen_random_uuid(),
   batch_id uuid references public.batches(id) on delete cascade,
@@ -208,13 +213,56 @@ using (true);
 drop policy if exists profiles_update_own_or_admin on public.profiles;
 create policy profiles_update_own_or_admin
 on public.profiles for update to authenticated
-using (true)
-with check (true);
+using (
+  id = auth.uid()
+  or public.current_role_name() in ('Admin', 'Super Admin')
+)
+with check (
+  id = auth.uid()
+  or (
+    public.current_role_name() in ('Admin', 'Super Admin')
+    and (
+      -- Super Admin can update anything
+      public.current_role_name() = 'Super Admin'
+      or (
+        -- For teacher profiles: allow Admin updates only when status does NOT change
+        -- (or admin sets it back to Pending).
+        not exists (
+          select 1
+          from public.roles r
+          where r.id = role_id and r.name = 'Teacher'
+        )
+        or status is not distinct from (
+          select p_old.status
+          from public.profiles p_old
+          where p_old.id = id
+        )
+        or status = 'Pending'
+      )
+    )
+  )
+);
 
 drop policy if exists profiles_insert_authenticated on public.profiles;
 create policy profiles_insert_authenticated
 on public.profiles for insert to authenticated
-with check (true);
+with check (
+  id = auth.uid()
+  or (
+    public.current_role_name() in ('Admin', 'Super Admin')
+    and (
+      public.current_role_name() = 'Super Admin'
+      or not (
+        exists (
+          select 1
+          from public.roles r
+          where r.id = role_id and r.name = 'Teacher'
+        )
+        and status is distinct from 'Pending'
+      )
+    )
+  )
+);
 
 -- courses
 drop policy if exists courses_select_authenticated on public.courses;

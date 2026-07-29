@@ -149,10 +149,10 @@ export default function TeacherAssignmentsPage() {
 
   return (
     <TeacherAssignmentGate courseName={courseName} genderScope={genderScope}>
-    <div className="p-8 space-y-6">
+    <div className="space-y-6">
       <div className="flex justify-between items-center gap-4 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold">Assignments</h1>
+          <h1 className="text-2xl font-bold sm:text-3xl">Assignments</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Create work for your class. Students submit to you; only you can give marks.
           </p>
@@ -244,7 +244,8 @@ export default function TeacherAssignmentsPage() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm text-left">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm text-left">
             <thead className="text-xs uppercase bg-muted/40 border-b">
               <tr>
                 <th className="px-4 py-4">SR#</th>
@@ -298,6 +299,7 @@ export default function TeacherAssignmentsPage() {
               )}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
     </div>

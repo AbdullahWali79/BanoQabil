@@ -11,12 +11,23 @@ import {
   Trash2,
   X,
   KeyRound,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { ensureStudentRow, relationOne } from '@/features/teacher/utils/teacherData';
 import {
   adminSetUserPassword,
+  adminSetUserEmail,
 } from '@/lib/adminPassword';
+import {
+  APPLICATION_ID_LENGTH,
+  generateUniqueApplicationId,
+  isApplicationIdTaken,
+  validateApplicationIdFormat,
+} from '@/lib/applicationId';
 
 type Profile = {
   id: string;
@@ -94,9 +105,28 @@ export default function ManageStudentsPage() {
   const [resetPassword, setResetPassword] = useState('');
   const [resetConfirm, setResetConfirm] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [generatingAppId, setGeneratingAppId] = useState(false);
+  const [appIdCheck, setAppIdCheck] = useState<{
+    status: 'idle' | 'checking' | 'valid' | 'invalid';
+    message: string;
+  }>({ status: 'idle', message: '' });
 
   const setField = (key: keyof StudentForm, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleAutoGenerateAppId = async () => {
+    setGeneratingAppId(true);
+    setMessage(null);
+    try {
+      const appId = await generateUniqueApplicationId();
+      setField('application_id', appId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to generate Application ID';
+      setMessage({ type: 'error', text: msg });
+    } finally {
+      setGeneratingAppId(false);
+    }
   };
 
   const fetchStudents = async () => {
@@ -134,6 +164,53 @@ export default function ManageStudentsPage() {
     });
     fetchStudents();
   }, []);
+
+  // Live Application ID format + uniqueness check while typing
+  useEffect(() => {
+    if (!editing && !showAdd) {
+      setAppIdCheck({ status: 'idle', message: '' });
+      return;
+    }
+
+    const raw = form.application_id.trim();
+    if (!raw) {
+      setAppIdCheck({ status: 'idle', message: '' });
+      return;
+    }
+
+    const formatErr = validateApplicationIdFormat(raw);
+    if (formatErr) {
+      setAppIdCheck({ status: 'invalid', message: formatErr });
+      return;
+    }
+
+    let cancelled = false;
+    setAppIdCheck({ status: 'checking', message: 'Checking uniqueness…' });
+    const timer = window.setTimeout(async () => {
+      try {
+        const taken = await isApplicationIdTaken(raw, editing?.id ?? null);
+        if (cancelled) return;
+        if (taken) {
+          setAppIdCheck({
+            status: 'invalid',
+            message: 'This Application ID is already used.',
+          });
+        } else {
+          setAppIdCheck({
+            status: 'valid',
+            message: 'Application ID is unique.',
+          });
+        }
+      } catch {
+        if (!cancelled) setAppIdCheck({ status: 'idle', message: '' });
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [form.application_id, editing, showAdd]);
 
   const filteredStudents = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -251,10 +328,25 @@ export default function ManageStudentsPage() {
 
   const saveEdit = async () => {
     if (!editing) return;
-    if (!form.full_name.trim()) {
-      setMessage({ type: 'error', text: 'Name is required.' });
+    if (!form.full_name.trim() || !form.email.trim()) {
+      setMessage({ type: 'error', text: 'Name and email are required.' });
       return;
     }
+    if (!form.application_id.trim()) {
+      setMessage({ type: 'error', text: 'Application ID is required.' });
+      return;
+    }
+    const formatErr = validateApplicationIdFormat(form.application_id);
+    if (formatErr) {
+      setMessage({ type: 'error', text: formatErr });
+      return;
+    }
+    const newEmail = form.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      setMessage({ type: 'error', text: 'Enter a valid email address.' });
+      return;
+    }
+
     setSaving(true);
     setMessage(null);
 
@@ -266,11 +358,41 @@ export default function ManageStudentsPage() {
       return;
     }
 
+    const appId = form.application_id.trim();
+    const taken = await isApplicationIdTaken(appId, editing.id);
+    if (taken) {
+      setMessage({
+        type: 'error',
+        text: `Application ID "${appId}" is already used by another student.`,
+      });
+      setSaving(false);
+      return;
+    }
+
+    const oldEmail = (profile?.email || '').trim().toLowerCase();
+    const emailChanged = newEmail !== oldEmail;
+
+    // If email changed, update Auth first so login matches (also syncs profiles.email via service role).
+    if (emailChanged) {
+      try {
+        await adminSetUserEmail(profileId, newEmail);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Email update failed';
+        setMessage({
+          type: 'error',
+          text: `${msg} Redeploy edge function admin-set-password if needed.`,
+        });
+        setSaving(false);
+        return;
+      }
+    }
+
     const [{ error: profileError }, { error: studentError }] = await Promise.all([
       supabase
         .from('profiles')
         .update({
           full_name: form.full_name.trim(),
+          email: newEmail,
           phone: form.phone.trim() || null,
           status: form.status,
         })
@@ -279,7 +401,7 @@ export default function ManageStudentsPage() {
         .from('students')
         .update({
           father_name: form.father_name.trim() || null,
-          application_id: form.application_id.trim() || null,
+          application_id: appId,
           gender: form.gender || null,
           course_id: form.course_id || null,
           batch_id: form.batch_id || null,
@@ -288,15 +410,23 @@ export default function ManageStudentsPage() {
     ]);
 
     if (profileError || studentError) {
+      const raw = profileError?.message || studentError?.message || 'Update failed';
       setMessage({
         type: 'error',
-        text: profileError?.message || studentError?.message || 'Update failed',
+        text: /unique|duplicate/i.test(raw)
+          ? `Application ID "${appId}" must be unique.`
+          : raw,
       });
       setSaving(false);
       return;
     }
 
-    setMessage({ type: 'success', text: 'Student updated successfully.' });
+    setMessage({
+      type: 'success',
+      text: emailChanged
+        ? `Student updated. Login email is now ${newEmail}.`
+        : 'Student updated successfully.',
+    });
     setEditing(null);
     setSaving(false);
     await fetchStudents();
@@ -314,13 +444,28 @@ export default function ManageStudentsPage() {
       setMessage({ type: 'error', text: 'Application ID is required.' });
       return;
     }
+    const formatErr = validateApplicationIdFormat(form.application_id);
+    if (formatErr) {
+      setMessage({ type: 'error', text: formatErr });
+      return;
+    }
     if (!studentRoleId) {
       setMessage({ type: 'error', text: 'Student role not found.' });
       return;
     }
 
+    const appId = form.application_id.trim();
+    const taken = await isApplicationIdTaken(appId);
+    if (taken) {
+      setMessage({
+        type: 'error',
+        text: `Application ID "${appId}" is already used. Enter another or click Auto Generate.`,
+      });
+      return;
+    }
+
     const password = useAppIdAsPassword
-      ? form.application_id.trim()
+      ? appId
       : form.password.trim();
 
     if (password.length < 6) {
@@ -345,7 +490,7 @@ export default function ManageStudentsPage() {
           data: {
             full_name: form.full_name.trim(),
             role: 'Student',
-            application_id: form.application_id.trim(),
+            application_id: appId,
           },
         },
       });
@@ -380,18 +525,28 @@ export default function ManageStudentsPage() {
       await ensureStudentRow(userId, {
         course_id: form.course_id || null,
         batch_id: form.batch_id || null,
+        application_id: appId,
       });
 
-      await supabase
+      const { error: studentUpdateError } = await supabase
         .from('students')
         .update({
           father_name: form.father_name.trim() || null,
-          application_id: form.application_id.trim(),
+          application_id: appId,
           gender: form.gender || null,
           course_id: form.course_id || null,
           batch_id: form.batch_id || null,
         })
         .eq('profile_id', userId);
+
+      if (studentUpdateError) {
+        const raw = studentUpdateError.message;
+        throw new Error(
+          /unique|duplicate/i.test(raw)
+            ? `Application ID "${appId}" must be unique.`
+            : raw,
+        );
+      }
 
       setMessage({
         type: 'success',
@@ -475,13 +630,12 @@ export default function ManageStudentsPage() {
       </div>
       <div className="space-y-2">
         <label className="text-sm font-medium">
-          Email {mode === 'add' ? <span className="text-destructive">*</span> : null}
+          Email <span className="text-destructive">*</span>
         </label>
         <Input
           type="email"
           value={form.email}
           onChange={(e) => setField('email', e.target.value)}
-          disabled={mode === 'edit'}
           placeholder="student@gmail.com"
         />
       </div>
@@ -505,12 +659,61 @@ export default function ManageStudentsPage() {
         <label className="text-sm font-medium">
           Application ID <span className="text-destructive">*</span>
         </label>
-        <Input
-          value={form.application_id}
-          onChange={(e) => setField('application_id', e.target.value)}
-          placeholder="Student application / sheet ID"
-          required={mode === 'add'}
-        />
+        <div className="flex gap-1.5">
+          <Input
+            value={form.application_id}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/\D/g, '').slice(0, APPLICATION_ID_LENGTH);
+              setField('application_id', digits);
+            }}
+            placeholder="7 digits e.g. 3117830"
+            required={mode === 'add'}
+            inputMode="numeric"
+            maxLength={APPLICATION_ID_LENGTH}
+            className="font-mono"
+            aria-invalid={appIdCheck.status === 'invalid'}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-10 w-10 shrink-0"
+            disabled={generatingAppId}
+            onClick={handleAutoGenerateAppId}
+            title="Auto Generate"
+            aria-label="Auto Generate Application ID"
+          >
+            {generatingAppId ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+        {appIdCheck.status !== 'idle' ? (
+          <p
+            className={`flex items-center gap-1.5 text-xs ${
+              appIdCheck.status === 'valid'
+                ? 'text-green-600'
+                : appIdCheck.status === 'checking'
+                  ? 'text-muted-foreground'
+                  : 'text-destructive'
+            }`}
+          >
+            {appIdCheck.status === 'valid' ? (
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+            ) : appIdCheck.status === 'checking' ? (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            ) : (
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            )}
+            {appIdCheck.message}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Exactly {APPLICATION_ID_LENGTH} digits · must be unique
+          </p>
+        )}
       </div>
       <div className="space-y-2">
         <label className="text-sm font-medium">Gender</label>
@@ -606,19 +809,16 @@ export default function ManageStudentsPage() {
               />
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Set a password yourself, or tick “Use Application ID as Password” (same as teachers).
-          </p>
         </div>
       )}
     </div>
   );
 
   return (
-    <div className="p-6 sm:p-8 space-y-6">
+    <div className="space-y-6">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Manage Students</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Manage Students</h1>
           <p className="text-muted-foreground mt-1">
             Search, filter, and manage students — 100 per page.
           </p>
@@ -923,10 +1123,6 @@ export default function ManageStudentsPage() {
               </div>
               <form onSubmit={handleAdd} className="space-y-4">
                 {formFields('add')}
-                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                  Fields marked <span className="text-destructive">*</span> are required. Admin
-                  sets the password, or ticks “Use Application ID as Password”.
-                </div>
                 <div className="flex justify-end gap-3 pt-2">
                   <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>
                     Cancel

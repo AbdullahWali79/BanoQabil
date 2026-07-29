@@ -5,13 +5,12 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { BookOpen, Search } from 'lucide-react';
+import { BookOpen, FileText, Search } from 'lucide-react';
 import {
   getStudentContext,
   resolveTeacherContact,
   type TeacherContact,
 } from '@/features/student/utils/studentData';
-import { TeacherInfoCard } from '@/features/student/components/TeacherInfoCard';
 
 type AssignmentRow = {
   id: string;
@@ -34,10 +33,32 @@ type SubmissionRow = {
   remarks: string | null;
 };
 
+type DraftLinks = { youtube_url: string; drive_url: string };
+type DraftFiles = { pdf: File | null; word: File | null };
+
+const FILE_UPLOAD_MAINTENANCE =
+  'File upload is under maintenance. Please submit via YouTube/Drive link for now, or try again later.';
+
 function marksTone(marks: number) {
   if (marks >= 80) return 'border-emerald-200 bg-emerald-50 text-emerald-800';
   if (marks >= 50) return 'border-amber-200 bg-amber-50 text-amber-900';
   return 'border-red-200 bg-red-50 text-red-800';
+}
+
+function isPdfFile(file: File) {
+  const name = file.name.toLowerCase();
+  return file.type === 'application/pdf' || name.endsWith('.pdf');
+}
+
+function isWordFile(file: File) {
+  const name = file.name.toLowerCase();
+  return (
+    file.type === 'application/msword' ||
+    file.type ===
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    name.endsWith('.doc') ||
+    name.endsWith('.docx')
+  );
 }
 
 export default function StudentAssignmentsPage() {
@@ -48,14 +69,21 @@ export default function StudentAssignmentsPage() {
   const [successMessage, setSuccessMessage] = useState('');
   const [studentId, setStudentId] = useState('');
   const [classTeacher, setClassTeacher] = useState<TeacherContact | null>(null);
-  const [courseName, setCourseName] = useState('');
-  const [batchName, setBatchName] = useState('');
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
   const [submissionsMap, setSubmissionsMap] = useState<Record<string, SubmissionRow>>({});
-  const [draftLinks, setDraftLinks] = useState<
-    Record<string, { youtube_url: string; drive_url: string }>
-  >({});
+  const [draftLinks, setDraftLinks] = useState<Record<string, DraftLinks>>({});
+  const [draftFiles, setDraftFiles] = useState<Record<string, DraftFiles>>({});
   const [savingId, setSavingId] = useState('');
+
+  const setDraftFile = (assignmentId: string, kind: 'pdf' | 'word', file: File | null) => {
+    setDraftFiles((prev) => ({
+      ...prev,
+      [assignmentId]: {
+        pdf: kind === 'pdf' ? file : (prev[assignmentId]?.pdf ?? null),
+        word: kind === 'word' ? file : (prev[assignmentId]?.word ?? null),
+      },
+    }));
+  };
 
   useEffect(() => {
     async function loadAssignments() {
@@ -72,8 +100,6 @@ export default function StudentAssignmentsPage() {
 
       setStudentId(ctx.studentId);
       setClassTeacher(ctx.teacher);
-      setCourseName(ctx.courseName);
-      setBatchName(ctx.batchName);
 
       if (!ctx.batchId) {
         setErrorMessage('You are not assigned to any batch yet. Ask admin to assign your class.');
@@ -128,7 +154,7 @@ export default function StudentAssignmentsPage() {
       }
 
       const map: Record<string, SubmissionRow> = {};
-      const draft: Record<string, { youtube_url: string; drive_url: string }> = {};
+      const draft: Record<string, DraftLinks> = {};
       (submissionData ?? []).forEach((item) => {
         const row = item as SubmissionRow;
         map[row.assignment_id] = row;
@@ -141,6 +167,7 @@ export default function StudentAssignmentsPage() {
       setAssignments(rows);
       setSubmissionsMap(map);
       setDraftLinks(draft);
+      setDraftFiles({});
       setLoading(false);
     }
 
@@ -160,7 +187,7 @@ export default function StudentAssignmentsPage() {
   const handleSubmitLinks = async (assignmentId: string) => {
     if (!studentId) return;
     if (!classTeacher) {
-      setErrorMessage('Cannot submit — your course teacher is not assigned yet.');
+      setErrorMessage('Cannot submit â€” your course teacher is not assigned yet.');
       return;
     }
 
@@ -180,10 +207,19 @@ export default function StudentAssignmentsPage() {
       return;
     }
 
+    const files = draftFiles[assignmentId] ?? { pdf: null, word: null };
+    if (files.pdf || files.word) {
+      setErrorMessage(FILE_UPLOAD_MAINTENANCE);
+      setSuccessMessage('');
+      return;
+    }
+
     const payload = draftLinks[assignmentId] ?? { youtube_url: '', drive_url: '' };
 
     if (!payload.youtube_url.trim() && !payload.drive_url.trim()) {
-      setErrorMessage('Please add at least one link (YouTube or Drive) before submitting.');
+      setErrorMessage(
+        'Please add at least one link (YouTube or Drive), or attach a PDF/Word file when upload is available.',
+      );
       return;
     }
 
@@ -227,6 +263,10 @@ export default function StudentAssignmentsPage() {
         drive_url: row.drive_url ?? '',
       },
     }));
+    setDraftFiles((prev) => ({
+      ...prev,
+      [assignmentId]: { pdf: null, word: null },
+    }));
     setSuccessMessage(
       `Submitted to ${classTeacher.fullName}. Your teacher will review and give marks.`,
     );
@@ -234,12 +274,13 @@ export default function StudentAssignmentsPage() {
   };
 
   return (
-    <div className="space-y-6 p-6 sm:p-8">
+    <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Assignments</h1>
           <p className="mt-1 text-muted-foreground">
-            Submit work to your course teacher. After grading, marks appear here and on{' '}
+            Submit PDF/Word or optional links to your teacher. After grading, marks appear here and
+            on{' '}
             <Link to="/dashboard/my-grades" className="font-medium text-primary hover:underline">
               My Grades
             </Link>
@@ -256,8 +297,6 @@ export default function StudentAssignmentsPage() {
           />
         </div>
       </div>
-
-      <TeacherInfoCard teacher={classTeacher} courseName={courseName} batchName={batchName} />
 
       {errorMessage ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -289,6 +328,7 @@ export default function StudentAssignmentsPage() {
           filtered.map((assignment, index) => {
             const submission = submissionsMap[assignment.id];
             const draft = draftLinks[assignment.id] ?? { youtube_url: '', drive_url: '' };
+            const files = draftFiles[assignment.id] ?? { pdf: null, word: null };
             const dueDate = new Date(assignment.due_date);
             const isClosed = assignment.status === 'Closed';
             const isGraded = submission?.status === 'Graded' || submission?.marks != null;
@@ -304,7 +344,7 @@ export default function StudentAssignmentsPage() {
                       <p className="mb-1 text-xs text-muted-foreground">SR# {index + 1}</p>
                       <h2 className="text-lg font-semibold">{assignment.title}</h2>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        Due {dueDate.toLocaleString()} · Submit to {teacherName}
+                        Due {dueDate.toLocaleString()} Â· Submit to {teacherName}
                       </p>
                     </div>
                     <span
@@ -323,7 +363,7 @@ export default function StudentAssignmentsPage() {
                       {isGraded
                         ? 'Graded'
                         : submission
-                          ? 'Submitted — awaiting marks'
+                          ? 'Submitted â€” awaiting marks'
                           : isOverdue
                             ? 'Overdue'
                             : isClosed
@@ -331,8 +371,6 @@ export default function StudentAssignmentsPage() {
                               : 'Pending submission'}
                     </span>
                   </div>
-
-                  <TeacherInfoCard teacher={assignment.teacher || classTeacher} compact />
 
                   {assignment.description ? (
                     <p className="text-sm text-muted-foreground">{assignment.description}</p>
@@ -354,8 +392,58 @@ export default function StudentAssignmentsPage() {
 
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-1.5">
+                      <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <FileText className="h-3.5 w-3.5" />
+                        PDF File
+                      </label>
+                      <Input
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        disabled={locked}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] ?? null;
+                          if (file && !isPdfFile(file)) {
+                            setErrorMessage('Please select a PDF file (.pdf).');
+                            e.target.value = '';
+                            setDraftFile(assignment.id, 'pdf', null);
+                            return;
+                          }
+                          setErrorMessage('');
+                          setDraftFile(assignment.id, 'pdf', file);
+                        }}
+                      />
+                      {files.pdf ? (
+                        <p className="truncate text-xs text-muted-foreground">{files.pdf.name}</p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <FileText className="h-3.5 w-3.5" />
+                        Word File
+                      </label>
+                      <Input
+                        type="file"
+                        accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        disabled={locked}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] ?? null;
+                          if (file && !isWordFile(file)) {
+                            setErrorMessage('Please select a Word file (.doc or .docx).');
+                            e.target.value = '';
+                            setDraftFile(assignment.id, 'word', null);
+                            return;
+                          }
+                          setErrorMessage('');
+                          setDraftFile(assignment.id, 'word', file);
+                        }}
+                      />
+                      {files.word ? (
+                        <p className="truncate text-xs text-muted-foreground">{files.word.name}</p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-1.5">
                       <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        YouTube Link
+                        YouTube Link (optional)
                       </label>
                       <Input
                         value={draft.youtube_url}
@@ -374,7 +462,7 @@ export default function StudentAssignmentsPage() {
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Google Drive Link
+                        Google Drive Link (optional)
                       </label>
                       <Input
                         value={draft.drive_url}
@@ -399,7 +487,7 @@ export default function StudentAssignmentsPage() {
                         ? 'Locked after grading. View all scores on My Grades.'
                         : submission
                           ? 'You can update links until your teacher grades this.'
-                          : 'Submit at least one link for your teacher to review.'}
+                          : 'Attach PDF/Word or add optional links, then submit to your teacher.'}
                     </p>
                     <Button
                       onClick={() => handleSubmitLinks(assignment.id)}

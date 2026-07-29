@@ -4,8 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Bell } from 'lucide-react';
-import { getStudentContext, type TeacherContact } from '@/features/student/utils/studentData';
-import { TeacherInfoCard } from '@/features/student/components/TeacherInfoCard';
+import { getStudentContext } from '@/features/student/utils/studentData';
 
 type NotificationRow = {
   id: string;
@@ -20,7 +19,6 @@ type NotificationRow = {
 export default function StudentNotificationsPage() {
   const { user } = useAuthStore();
   const [items, setItems] = useState<NotificationRow[]>([]);
-  const [teacher, setTeacher] = useState<TeacherContact | null>(null);
   const [loading, setLoading] = useState(true);
   const [markingAll, setMarkingAll] = useState(false);
   const [error, setError] = useState('');
@@ -33,7 +31,6 @@ export default function StudentNotificationsPage() {
     setError('');
 
     const ctx = await getStudentContext(user.id);
-    setTeacher(ctx?.teacher ?? null);
 
     const { data, error: err } = await supabase
       .from('notifications')
@@ -94,23 +91,21 @@ export default function StudentNotificationsPage() {
   };
 
   return (
-    <div className="space-y-6 p-6 sm:p-8">
+    <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Notifications</h1>
           <p className="mt-1 text-muted-foreground">
             Messages from your course teacher
-            {unreadCount > 0 ? ` · ${unreadCount} unread` : ''}.
+            {unreadCount > 0 ? ` Â· ${unreadCount} unread` : ''}.
           </p>
         </div>
         {unreadCount > 0 ? (
           <Button variant="outline" size="sm" onClick={() => void markAllRead()} disabled={markingAll}>
-            {markingAll ? 'Updating…' : 'Mark all read'}
+            {markingAll ? 'Updatingâ€¦' : 'Mark all read'}
           </Button>
         ) : null}
       </div>
-
-      <TeacherInfoCard teacher={teacher} compact />
 
       {error ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -146,9 +141,7 @@ export default function StudentNotificationsPage() {
                         {n.message}
                       </p>
                       <p className="mt-2 text-xs text-muted-foreground">
-                        From: {n.senderName}
-                        {teacher?.phone && teacher.phone !== '—' ? ` · ${teacher.phone}` : ''} ·{' '}
-                        {new Date(n.created_at).toLocaleString()}
+                        From: {n.senderName} Â· {new Date(n.created_at).toLocaleString()}
                       </p>
                     </div>
                     {!n.is_read ? (

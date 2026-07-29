@@ -240,7 +240,7 @@ export default function SettingsPage() {
   const initials = getInitials(fullName, email);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Profile & Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">

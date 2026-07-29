@@ -14,12 +14,7 @@ insert into public.roles (name)
 select 'Student'
 where not exists (select 1 from public.roles where name = 'Student');
 
--- 2) Approve and assign role to demo users if they exist
-update public.profiles p
-set role_id = r.id, status = 'Approved'
-from public.roles r
-where p.email = 'admin123@gmail.com' and r.name = 'Admin';
-
+-- 2) Approve and assign role to demo users if they exist (no demo Admin)
 update public.profiles p
 set role_id = r.id, status = 'Approved'
 from public.roles r
@@ -53,14 +48,14 @@ from (
 ) as v(name, description)
 where not exists (select 1 from public.courses c where c.name = v.name);
 
--- 5) Insert sample batches (generic insert; if schema differs, insert manually)
-insert into public.batches (course_id, name, timing, start_date, end_date)
-select c.id, v.batch_name, v.timing, v.start_date::date, v.end_date::date
+-- 5) Insert sample batches (no start_date/end_date — not on all schemas)
+insert into public.batches (course_id, name, timing)
+select c.id, v.batch_name, v.timing
 from (
   values
-    ('Web Development', 'WD-Batch-01', 'Mon-Wed-Fri 7:00 PM', '2026-08-01', '2026-11-01'),
-    ('Python Programming', 'PY-Batch-01', 'Tue-Thu-Sat 7:00 PM', '2026-08-05', '2026-11-05')
-) as v(course_name, batch_name, timing, start_date, end_date)
+    ('Web Development', 'WD-Batch-01', 'Mon-Wed-Fri 7:00 PM'),
+    ('Python Programming', 'PY-Batch-01', 'Tue-Thu-Sat 7:00 PM')
+) as v(course_name, batch_name, timing)
 join public.courses c on c.name = v.course_name
 where not exists (select 1 from public.batches b where b.name = v.batch_name);
 

@@ -306,7 +306,7 @@ export default function TeacherDashboard() {
   }
 
   return (
-    <div className="p-6 sm:p-8 space-y-8">
+    <div className="space-y-8">
       <TeacherAssignmentGate courseName={course?.name} genderScope={course?.genderScope ?? null} soft>
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

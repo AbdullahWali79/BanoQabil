@@ -90,7 +90,7 @@ export default function AllSubmissionsPage() {
       <Card className="shadow-sm">
         <CardContent className="p-0">
           <div className="p-4 border-b flex flex-wrap gap-4 items-center">
-            <div className="relative w-64">
+            <div className="relative w-full max-w-xs">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 placeholder="Search student or title..."

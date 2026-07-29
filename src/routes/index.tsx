@@ -8,6 +8,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { LandingPage } from '@/pages/LandingPage';
 import { PendingApprovalsPage } from '@/features/admin/pages/PendingApprovalsPage';
 import { useAuthStore } from '@/store/authStore';
+import { effectiveAppRole } from '@/lib/roles';
 
 // Lazy load all heavy pages to avoid a single bad import crashing the whole app
 const AdminDashboard = lazy(() => import('@/features/admin/pages/AdminDashboard'));
@@ -15,6 +16,12 @@ const ManageTeachersPage = lazy(() => import('@/features/admin/pages/ManageTeach
 const ManageStudentsPage = lazy(() => import('@/features/admin/pages/ManageStudentsPage'));
 const CoursesPage = lazy(() => import('@/features/admin/pages/CoursesPage'));
 const ReportsPage = lazy(() => import('@/features/admin/pages/ReportsPage'));
+const StudentFeesPage = lazy(() => import('@/features/admin/pages/StudentFeesPage'));
+
+const SuperAdminDashboard = lazy(() => import('@/features/superadmin/pages/SuperAdminDashboard'));
+const RolesPage = lazy(() => import('@/features/superadmin/pages/RolesPage'));
+const ManageAdminsPage = lazy(() => import('@/features/superadmin/pages/ManageAdminsPage'));
+const StaffPayPage = lazy(() => import('@/features/superadmin/pages/StaffPayPage'));
 
 const TeacherDashboard = lazy(() => import('@/features/teacher/pages/TeacherDashboard'));
 const MyClassPage = lazy(() => import('@/features/teacher/pages/MyClassPage'));
@@ -47,9 +54,10 @@ function PageLoader() {
 
 // Role-aware Dashboard — shows the correct portal for each role
 function RoleDashboard() {
-  const { role, isLoading } = useAuthStore();
+  const { role, user, isLoading } = useAuthStore();
+  const appRole = effectiveAppRole(user?.email, role);
 
-  if (isLoading || !role) {
+  if (isLoading || !appRole) {
     return (
       <div className="p-8 text-center">
         <h1 className="text-2xl font-bold">Welcome to BanoQabil</h1>
@@ -62,9 +70,10 @@ function RoleDashboard() {
 
   return (
     <Suspense fallback={<PageLoader />}>
-      {(role === 'Super Admin' || role === 'Admin') && <AdminDashboard />}
-      {role === 'Teacher' && <TeacherDashboard />}
-      {role === 'Student' && <StudentDashboard />}
+      {appRole === 'Super Admin' && <SuperAdminDashboard />}
+      {appRole === 'Admin' && <AdminDashboard />}
+      {appRole === 'Teacher' && <TeacherDashboard />}
+      {appRole === 'Student' && <StudentDashboard />}
     </Suspense>
   );
 }
@@ -95,12 +104,18 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <RoleDashboard /> },
 
-      // Super Admin / Admin only
-      { path: 'approvals', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><PendingApprovalsPage /></ProtectedRoute> },
-      { path: 'teachers', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><Lazy><ManageTeachersPage /></Lazy></ProtectedRoute> },
-      { path: 'students', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><Lazy><ManageStudentsPage /></Lazy></ProtectedRoute> },
-      { path: 'courses', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><Lazy><CoursesPage /></Lazy></ProtectedRoute> },
-      { path: 'reports', element: <ProtectedRoute allowedRoles={['Super Admin', 'Admin']}><Lazy><ReportsPage /></Lazy></ProtectedRoute> },
+      // Super Admin only
+      { path: 'roles', element: <ProtectedRoute allowedRoles={['Super Admin']}><Lazy><RolesPage /></Lazy></ProtectedRoute> },
+      { path: 'admins', element: <ProtectedRoute allowedRoles={['Super Admin']}><Lazy><ManageAdminsPage /></Lazy></ProtectedRoute> },
+      { path: 'staff-pay', element: <ProtectedRoute allowedRoles={['Super Admin']}><Lazy><StaffPayPage /></Lazy></ProtectedRoute> },
+
+      // Admin + Super Admin (students approve by Admin; teachers approve/reject by Super Admin)
+      { path: 'approvals', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><PendingApprovalsPage /></ProtectedRoute> },
+      { path: 'teachers', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><Lazy><ManageTeachersPage /></Lazy></ProtectedRoute> },
+      { path: 'students', element: <ProtectedRoute allowedRoles={['Admin']}><Lazy><ManageStudentsPage /></Lazy></ProtectedRoute> },
+      { path: 'courses', element: <ProtectedRoute allowedRoles={['Admin']}><Lazy><CoursesPage /></Lazy></ProtectedRoute> },
+      { path: 'fees', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><Lazy><StudentFeesPage /></Lazy></ProtectedRoute> },
+      { path: 'reports', element: <ProtectedRoute allowedRoles={['Admin']}><Lazy><ReportsPage /></Lazy></ProtectedRoute> },
 
       // Teacher
       // Assignments create/grade are teacher-only (not admin)

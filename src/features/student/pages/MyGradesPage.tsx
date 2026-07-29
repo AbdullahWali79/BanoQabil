@@ -5,8 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Award, TrendingUp } from 'lucide-react';
 import { relationOne } from '@/features/teacher/utils/teacherData';
-import { getStudentContext, type TeacherContact } from '@/features/student/utils/studentData';
-import { TeacherInfoCard } from '@/features/student/components/TeacherInfoCard';
+import { getStudentContext } from '@/features/student/utils/studentData';
 
 type GradeRow = {
   id: string;
@@ -30,7 +29,6 @@ export default function MyGradesPage() {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [grades, setGrades] = useState<GradeRow[]>([]);
-  const [teacher, setTeacher] = useState<TeacherContact | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
@@ -40,7 +38,6 @@ export default function MyGradesPage() {
       setErrorMessage('');
 
       const ctx = await getStudentContext(user.id);
-      setTeacher(ctx?.teacher ?? null);
 
       if (!ctx?.studentId) {
         setErrorMessage('Student profile not found. Please contact admin.');
@@ -79,15 +76,13 @@ export default function MyGradesPage() {
   }, [grades]);
 
   return (
-    <div className="space-y-6 p-6 sm:p-8">
+    <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">My Grades</h1>
         <p className="mt-1 text-muted-foreground">
           Marks given by your course teacher for each assignment (out of 100).
         </p>
       </div>
-
-      <TeacherInfoCard teacher={teacher} compact />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
@@ -97,7 +92,7 @@ export default function MyGradesPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Average Marks</p>
-              <p className="text-2xl font-bold">{average != null ? `${average} / 100` : '—'}</p>
+              <p className="text-2xl font-bold">{average != null ? `${average} / 100` : 'â€”'}</p>
             </div>
           </CardContent>
         </Card>
@@ -108,7 +103,7 @@ export default function MyGradesPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Highest Marks</p>
-              <p className="text-2xl font-bold">{highest != null ? `${highest} / 100` : '—'}</p>
+              <p className="text-2xl font-bold">{highest != null ? `${highest} / 100` : 'â€”'}</p>
             </div>
           </CardContent>
         </Card>
@@ -157,19 +152,19 @@ export default function MyGradesPage() {
                     return (
                       <tr key={row.id} className="border-b">
                         <td className="px-4 py-4 text-muted-foreground">{index + 1}</td>
-                        <td className="px-6 py-4 font-medium">{assignment?.title || '—'}</td>
+                        <td className="px-6 py-4 font-medium">{assignment?.title || 'â€”'}</td>
                         <td className="px-6 py-4 text-muted-foreground">
                           {row.graded_at
                             ? new Date(row.graded_at).toLocaleString()
                             : assignment?.due_date
                               ? new Date(assignment.due_date).toLocaleDateString()
-                              : '—'}
+                              : 'â€”'}
                         </td>
                         <td className={`px-6 py-4 text-base font-bold ${marksTone(marks)}`}>
                           {marks} / 100
                         </td>
                         <td className="px-6 py-4 text-muted-foreground">
-                          {row.remarks || '—'}
+                          {row.remarks || 'â€”'}
                         </td>
                       </tr>
                     );

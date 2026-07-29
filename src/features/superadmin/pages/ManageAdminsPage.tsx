@@ -1,390 +1,844 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useMemo, useState } from 'react';
+import { supabase, createEphemeralAuthClient } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Shield, CheckCircle, XCircle, Settings2, Key, Trash2, Plus, Edit2 } from 'lucide-react';
+import {
+  Shield,
+  CheckCircle,
+  XCircle,
+  Settings2,
+  KeyRound,
+  Trash2,
+  Plus,
+  Edit,
+  X,
+  Search,
+} from 'lucide-react';
+import { adminSetUserEmail, adminSetUserPassword } from '@/lib/adminPassword';
+import { useAuthStore } from '@/store/authStore';
+import { effectiveAppRole, PRIMARY_ADMIN_EMAIL, SUPER_ADMIN_EMAIL } from '@/lib/roles';
+import { relationOne } from '@/features/teacher/utils/teacherData';
 
-type Admin = {
+type AdminRow = {
   id: string;
-  full_name: string;
-  email: string;
-  status: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  status: string | null;
   permissions: Record<string, boolean> | null;
 };
 
 const PERMISSION_KEYS: { key: string; label: string }[] = [
-  { key: 'can_approve_users',    label: 'Approve / Reject Users' },
-  { key: 'can_manage_teachers',  label: 'Manage Teachers' },
-  { key: 'can_manage_students',  label: 'Manage Students' },
-  { key: 'can_manage_courses',   label: 'Manage Courses' },
-  { key: 'can_assign_teachers',  label: 'Assign Teachers to Courses' },
-  { key: 'can_view_reports',     label: 'View Reports' },
-  { key: 'can_export_pdf',       label: 'Export PDF Reports' },
-  { key: 'can_reset_passwords',  label: 'Reset User Passwords' },
+  { key: 'can_approve_users', label: 'Approve / Reject Users' },
+  { key: 'can_manage_teachers', label: 'Manage Teachers' },
+  { key: 'can_manage_students', label: 'Manage Students' },
+  { key: 'can_manage_courses', label: 'Manage Courses' },
+  { key: 'can_assign_teachers', label: 'Assign Teachers to Courses' },
+  { key: 'can_view_reports', label: 'View Reports' },
+  { key: 'can_export_pdf', label: 'Export PDF Reports' },
+  { key: 'can_reset_passwords', label: 'Reset User Passwords' },
   { key: 'can_view_submissions', label: 'View All Submissions' },
 ];
 
+const emptyAdd = { full_name: '', email: '', phone: '', password: '', confirmPassword: '' };
+const emptyEdit = { full_name: '', email: '', phone: '', status: 'Approved' };
+
 export default function ManageAdminsPage() {
-  const [admins, setAdmins] = useState<Admin[]>([]);
+  const { user, role } = useAuthStore();
+  const appRole = effectiveAppRole(user?.email, role);
+  const isSuperAdmin = appRole === 'Super Admin';
+
+  const [admins, setAdmins] = useState<AdminRow[]>([]);
+  const [adminRoleId, setAdminRoleId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState('');
-  
-  // Modals State
-  const [selectedAdmin, setSelectedAdmin] = useState<Admin | null>(null);
-  const [perms, setPerms] = useState<Record<string, boolean>>({});
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'All' | 'Approved' | 'Suspended' | 'Pending'>('All');
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  
-  const [resetPasswordAdmin, setResetPasswordAdmin] = useState<Admin | null>(null);
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState(emptyAdd);
+
+  const [editing, setEditing] = useState<AdminRow | null>(null);
+  const [editForm, setEditForm] = useState(emptyEdit);
+
+  const [permsAdmin, setPermsAdmin] = useState<AdminRow | null>(null);
+  const [perms, setPerms] = useState<Record<string, boolean>>({});
+
+  const [resetAdmin, setResetAdmin] = useState<AdminRow | null>(null);
   const [newPassword, setNewPassword] = useState('');
-  const [resetting, setResetting] = useState(false);
-
-  const [deleteAdmin, setDeleteAdmin] = useState<Admin | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  const [isAddAdminOpen, setIsAddAdminOpen] = useState(false);
-  const [addAdminForm, setAddAdminForm] = useState({ full_name: '', email: '', password: '' });
-  const [adding, setAdding] = useState(false);
-
-  const [editAdmin, setEditAdmin] = useState<Admin | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', email: '' });
-  const [editing, setEditing] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const fetchAdmins = async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
-      .select('id, full_name, email, status, permissions, roles!inner(name)')
+      .select('id, full_name, email, phone, status, permissions, roles!inner(name)')
       .eq('roles.name', 'Admin')
       .order('full_name');
 
-    if (data) setAdmins(data as Admin[]);
+    if (error) {
+      setAdmins([]);
+      setMessage({ type: 'error', text: error.message });
+    } else {
+      const list = ((data ?? []) as Array<Record<string, unknown>>)
+        .map((row) => {
+          const roles = relationOne(row.roles as { name: string } | { name: string }[] | null);
+          if (roles?.name !== 'Admin') return null;
+          const email = String(row.email || '').toLowerCase();
+          if (email === SUPER_ADMIN_EMAIL) return null;
+          return {
+            id: String(row.id),
+            full_name: (row.full_name as string | null) ?? null,
+            email: (row.email as string | null) ?? null,
+            phone: (row.phone as string | null) ?? null,
+            status: (row.status as string | null) ?? null,
+            permissions: (row.permissions as Record<string, boolean> | null) ?? null,
+          } satisfies AdminRow;
+        })
+        .filter(Boolean) as AdminRow[];
+      setAdmins(list);
+    }
     setLoading(false);
   };
 
-  useEffect(() => { fetchAdmins(); }, []);
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    void supabase
+      .from('roles')
+      .select('id, name')
+      .then(({ data }) => {
+        setAdminRoleId(data?.find((r) => r.name === 'Admin')?.id ?? null);
+      });
+    void fetchAdmins();
+  }, [isSuperAdmin]);
 
-  const openPerms = (admin: Admin) => {
-    setSelectedAdmin(admin);
-    setPerms(admin.permissions ?? {});
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return admins.filter((a) => {
+      if (statusFilter !== 'All' && (a.status || '') !== statusFilter) return false;
+      if (!q) return true;
+      return (
+        (a.full_name || '').toLowerCase().includes(q) ||
+        (a.email || '').toLowerCase().includes(q) ||
+        (a.phone || '').toLowerCase().includes(q)
+      );
+    });
+  }, [admins, search, statusFilter]);
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="p-8 text-center">
+        <h1 className="text-2xl font-bold">Access denied</h1>
+        <p className="text-muted-foreground mt-2">Only Super Admin can manage Admin accounts.</p>
+      </div>
+    );
+  }
+
+  const openEdit = (admin: AdminRow) => {
+    setEditing(admin);
+    setEditForm({
+      full_name: admin.full_name || '',
+      email: admin.email || '',
+      phone: admin.phone || '',
+      status: admin.status || 'Approved',
+    });
+  };
+
+  const handleAddAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMessage(null);
+
+    const full_name = addForm.full_name.trim();
+    const email = addForm.email.trim().toLowerCase();
+    const phone = addForm.phone.trim();
+    const password = addForm.password;
+
+    if (!full_name || !email) {
+      setMessage({ type: 'error', text: 'Name and email are required.' });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setMessage({ type: 'error', text: 'Enter a valid email address.' });
+      return;
+    }
+    if (email === SUPER_ADMIN_EMAIL) {
+      setMessage({ type: 'error', text: 'This email is reserved for Super Admin.' });
+      return;
+    }
+    if (password.length < 6) {
+      setMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
+      return;
+    }
+    if (password !== addForm.confirmPassword) {
+      setMessage({ type: 'error', text: 'Password and Confirm Password do not match.' });
+      return;
+    }
+    if (!adminRoleId) {
+      setMessage({ type: 'error', text: 'Admin role not found in database.' });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const ephemeral = createEphemeralAuthClient();
+      const { data: authData, error: signUpError } = await ephemeral.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name,
+            role: 'Admin',
+          },
+        },
+      });
+
+      if (signUpError) throw new Error(signUpError.message);
+
+      const userId = authData.user?.id;
+      if (!userId) {
+        throw new Error(
+          'Admin account was not created. Check email confirmation settings in Supabase Auth.',
+        );
+      }
+
+      await new Promise((r) => setTimeout(r, 800));
+
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', userId)
+        .limit(1);
+
+      const profilePatch = {
+        full_name,
+        email,
+        phone: phone || null,
+        role_id: adminRoleId,
+        status: 'Approved' as const,
+        permissions: Object.fromEntries(PERMISSION_KEYS.map((p) => [p.key, true])),
+      };
+
+      if (existingProfile?.[0]) {
+        const { error } = await supabase.from('profiles').update(profilePatch).eq('id', userId);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await supabase.from('profiles').insert({ id: userId, ...profilePatch });
+        if (error) throw new Error(error.message);
+      }
+
+      setMessage({
+        type: 'success',
+        text: `Admin "${full_name}" created. Login: ${email}`,
+      });
+      setAddForm(emptyAdd);
+      setShowAdd(false);
+      await fetchAdmins();
+    } catch (err: unknown) {
+      setMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Failed to create admin.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editing) return;
+    setMessage(null);
+
+    const full_name = editForm.full_name.trim();
+    const email = editForm.email.trim().toLowerCase();
+    const phone = editForm.phone.trim();
+
+    if (!full_name || !email) {
+      setMessage({ type: 'error', text: 'Name and email are required.' });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setMessage({ type: 'error', text: 'Enter a valid email address.' });
+      return;
+    }
+    if (email === SUPER_ADMIN_EMAIL) {
+      setMessage({ type: 'error', text: 'This email is reserved for Super Admin.' });
+      return;
+    }
+
+    setSaving(true);
+    const prevEmail = (editing.email || '').trim().toLowerCase();
+    const emailChanged = email !== prevEmail;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        full_name,
+        email,
+        phone: phone || null,
+        status: editForm.status,
+      })
+      .eq('id', editing.id);
+
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+      setSaving(false);
+      return;
+    }
+
+    if (emailChanged) {
+      try {
+        await adminSetUserEmail(editing.id, email);
+      } catch (err: unknown) {
+        setMessage({
+          type: 'error',
+          text:
+            err instanceof Error
+              ? err.message
+              : 'Profile saved, but login email update failed. Redeploy admin-set-password.',
+        });
+        setSaving(false);
+        await fetchAdmins();
+        return;
+      }
+    }
+
+    setMessage({ type: 'success', text: 'Admin updated successfully.' });
+    setEditing(null);
+    setSaving(false);
+    await fetchAdmins();
+  };
+
+  const setStatus = async (admin: AdminRow, status: 'Approved' | 'Suspended' | 'Pending') => {
+    if (admin.id === user?.id) {
+      setMessage({ type: 'error', text: 'You cannot change your own status here.' });
+      return;
+    }
+    if (admin.status === status) return;
+    if (!confirm(`Set ${admin.full_name || admin.email} to ${status}?`)) return;
+
+    const { error } = await supabase.from('profiles').update({ status }).eq('id', admin.id);
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+      return;
+    }
+    setMessage({ type: 'success', text: `Admin status set to ${status}.` });
+    await fetchAdmins();
+  };
+
+  const removeAdmin = async (admin: AdminRow) => {
+    if (admin.id === user?.id) {
+      setMessage({ type: 'error', text: 'You cannot remove your own account.' });
+      return;
+    }
+    const email = (admin.email || '').toLowerCase();
+    const isPrimary = email === PRIMARY_ADMIN_EMAIL;
+    const ok = confirm(
+      isPrimary
+        ? `Remove PRIMARY admin "${admin.full_name}" (${admin.email})?\n\nThis suspends the account. Auth login may still exist.`
+        : `Remove admin "${admin.full_name}"?\n\nThis suspends the account. Auth login may still exist.`,
+    );
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ status: 'Suspended' })
+      .eq('id', admin.id);
+
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+      return;
+    }
+    setMessage({ type: 'success', text: 'Admin removed (account suspended).' });
+    await fetchAdmins();
   };
 
   const savePerms = async () => {
-    if (!selectedAdmin) return;
+    if (!permsAdmin) return;
     setSaving(true);
-    const { error } = await supabase.from('profiles').update({ permissions: perms }).eq('id', selectedAdmin.id);
-    if (!error) {
-      setToast(`✅ Permissions saved for ${selectedAdmin.full_name}`);
-      setAdmins(prev => prev.map(a => a.id === selectedAdmin.id ? { ...a, permissions: perms } : a));
-      setSelectedAdmin(null);
-      setTimeout(() => setToast(''), 3000);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ permissions: perms })
+      .eq('id', permsAdmin.id);
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+    } else {
+      setMessage({ type: 'success', text: `Permissions saved for ${permsAdmin.full_name}.` });
+      setPermsAdmin(null);
+      await fetchAdmins();
     }
     setSaving(false);
   };
 
   const handleResetPassword = async () => {
-    if (!resetPasswordAdmin || newPassword.length < 6) return;
-    setResetting(true);
-    const { error } = await supabase.rpc('update_user_password', {
-      user_id: resetPasswordAdmin.id,
-      new_password: newPassword
-    });
-    if (!error) {
-      setToast(`✅ Password reset successfully for ${resetPasswordAdmin.full_name}`);
-      setResetPasswordAdmin(null);
+    if (!resetAdmin) return;
+    if (newPassword.length < 6) {
+      setMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setMessage({ type: 'error', text: 'Passwords do not match.' });
+      return;
+    }
+    setSaving(true);
+    try {
+      await adminSetUserPassword(resetAdmin.id, newPassword);
+      setMessage({ type: 'success', text: `Password reset for ${resetAdmin.full_name}.` });
+      setResetAdmin(null);
       setNewPassword('');
-      setTimeout(() => setToast(''), 3000);
-    } else alert(`Error resetting password: ${error.message}`);
-    setResetting(false);
-  };
-
-  const handleDeleteUser = async () => {
-    if (!deleteAdmin) return;
-    setDeleting(true);
-    const { error } = await supabase.rpc('delete_user', { user_id: deleteAdmin.id });
-    if (!error) {
-      setToast(`🗑️ ${deleteAdmin.full_name} has been deleted permanently.`);
-      setAdmins(prev => prev.filter(a => a.id !== deleteAdmin.id));
-      setDeleteAdmin(null);
-      setTimeout(() => setToast(''), 3000);
-    } else alert(`Error deleting user: ${error.message}`);
-    setDeleting(false);
-  };
-
-  const toggleStatus = async (admin: Admin) => {
-    const newStatus = admin.status === 'Approved' ? 'Suspended' : 'Approved';
-    const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', admin.id);
-    if (!error) {
-      setAdmins(prev => prev.map(a => a.id === admin.id ? { ...a, status: newStatus } : a));
-      setToast(`✅ ${admin.full_name} is now ${newStatus}`);
-      setTimeout(() => setToast(''), 3000);
+      setConfirmPassword('');
+    } catch (err: unknown) {
+      setMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Password reset failed.',
+      });
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleAddAdmin = async () => {
-    if (!addAdminForm.email || !addAdminForm.full_name || addAdminForm.password.length < 6) return;
-    setAdding(true);
-    const { error } = await supabase.rpc('create_admin', {
-      new_email: addAdminForm.email,
-      new_password: addAdminForm.password,
-      new_full_name: addAdminForm.full_name
-    });
-    if (!error) {
-      setToast(`🎉 Admin ${addAdminForm.full_name} created successfully!`);
-      setIsAddAdminOpen(false);
-      setAddAdminForm({ full_name: '', email: '', password: '' });
-      fetchAdmins();
-      setTimeout(() => setToast(''), 3000);
-    } else alert(`Error creating admin: ${error.message}`);
-    setAdding(false);
-  };
-
-  const handleEditAdmin = async () => {
-    if (!editAdmin || !editForm.email || !editForm.full_name) return;
-    setEditing(true);
-    const { error } = await supabase.rpc('update_admin_details', {
-      user_id: editAdmin.id,
-      new_email: editForm.email,
-      new_full_name: editForm.full_name
-    });
-    if (!error) {
-      setToast(`✅ Details updated for ${editForm.full_name}`);
-      setAdmins(prev => prev.map(a => a.id === editAdmin.id ? { ...a, full_name: editForm.full_name, email: editForm.email } : a));
-      setEditAdmin(null);
-      setTimeout(() => setToast(''), 3000);
-    } else alert(`Error updating admin: ${error.message}`);
-    setEditing(false);
-  };
-
   return (
-    <div className="p-6 space-y-6">
-      {toast && (
-        <div className="fixed top-4 right-4 z-50 bg-green-600 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium animate-in slide-in-from-top-2">
-          {toast}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-xl">
-            <Shield className="w-6 h-6 text-purple-600" />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-start gap-3">
+          <div className="rounded-lg border bg-muted/40 p-2">
+            <Shield className="h-6 w-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold">Manage Admins</h1>
-            <p className="text-muted-foreground text-sm">Create and control admin accounts</p>
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Manage Admins</h1>
+            <p className="text-muted-foreground mt-1">
+              Add, edit email, reset password, change status, or remove Admin accounts.
+            </p>
           </div>
         </div>
-        <Button onClick={() => setIsAddAdminOpen(true)} className="gap-2">
-          <Plus size={16} /> Add New Admin
+        <Button
+          className="gap-2"
+          onClick={() => {
+            setAddForm(emptyAdd);
+            setShowAdd(true);
+          }}
+        >
+          <Plus className="w-4 h-4" /> Add Admin
         </Button>
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-primary" />
+      {message ? (
+        <div
+          className={`rounded-md border px-4 py-3 text-sm ${
+            message.type === 'success'
+              ? 'border-green-200 bg-green-50 text-green-800 dark:border-green-900/40 dark:bg-green-950/30 dark:text-green-300'
+              : 'border-destructive/30 bg-destructive/10 text-destructive'
+          }`}
+        >
+          {message.text}
         </div>
-      ) : admins.length === 0 ? (
-        <Card>
-          <CardContent className="py-16 text-center text-muted-foreground">
-            <Shield className="w-12 h-12 mx-auto mb-4 opacity-30" />
-            <p className="font-medium">No admins found</p>
-            <p className="text-sm mt-1">Click the button above to create the first admin.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b bg-muted/50">
+      ) : null}
+
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative max-w-md w-full">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                placeholder="Search name, email, phone…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <select
+              className="h-10 rounded-md border bg-background px-3 text-sm"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            >
+              <option value="All">All Status</option>
+              <option value="Approved">Approved</option>
+              <option value="Pending">Pending</option>
+              <option value="Suspended">Suspended</option>
+            </select>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="text-xs text-muted-foreground bg-muted/50 uppercase tracking-wide">
+                <tr>
+                  <th className="px-4 py-3.5 font-semibold">Admin</th>
+                  <th className="px-4 py-3.5 font-semibold">Email</th>
+                  <th className="px-4 py-3.5 font-semibold">Status</th>
+                  <th className="px-4 py-3.5 font-semibold">Permissions</th>
+                  <th className="px-4 py-3.5 font-semibold text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
                   <tr>
-                    <th className="text-left px-6 py-4 font-semibold">Admin</th>
-                    <th className="text-left px-6 py-4 font-semibold">Email</th>
-                    <th className="text-left px-6 py-4 font-semibold">Status</th>
-                    <th className="text-left px-6 py-4 font-semibold">Permissions</th>
-                    <th className="px-6 py-4 text-right font-semibold">Actions</th>
+                    <td colSpan={5} className="py-10 text-center">
+                      <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {admins.map((admin) => {
-                    const grantedCount = Object.values(admin.permissions ?? {}).filter(Boolean).length;
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-12 text-center text-muted-foreground">
+                      No admins found
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((admin) => {
+                    const granted = Object.values(admin.permissions ?? {}).filter(Boolean).length;
+                    const isPrimary = (admin.email || '').toLowerCase() === PRIMARY_ADMIN_EMAIL;
                     return (
-                      <tr key={admin.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="px-6 py-4">
+                      <tr key={admin.id} className="border-b hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center text-white font-semibold text-sm">
-                              {admin.full_name?.charAt(0)?.toUpperCase() || 'A'}
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
+                              {(admin.full_name || 'A').charAt(0).toUpperCase()}
                             </div>
-                            <span className="font-medium">{admin.full_name}</span>
+                            <div>
+                              <p className="font-semibold leading-tight">{admin.full_name || '—'}</p>
+                              {isPrimary ? (
+                                <p className="text-xs text-muted-foreground mt-0.5">Primary Admin</p>
+                              ) : null}
+                            </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-muted-foreground">{admin.email}</td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                            admin.status === 'Approved' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                          }`}>
-                            {admin.status === 'Approved' ? <CheckCircle size={10} /> : <XCircle size={10} />}
-                            {admin.status}
+                        <td className="px-4 py-4">
+                          <p>{admin.email}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {admin.phone || 'No phone'}
+                          </p>
+                        </td>
+                        <td className="px-4 py-4">
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                              admin.status === 'Approved'
+                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                : admin.status === 'Suspended'
+                                  ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                  : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                            }`}
+                          >
+                            {admin.status === 'Approved' ? (
+                              <CheckCircle className="h-3 w-3" />
+                            ) : (
+                              <XCircle className="h-3 w-3" />
+                            )}
+                            {admin.status || '—'}
                           </span>
                         </td>
-                        <td className="px-6 py-4">
-                          <span className="text-muted-foreground text-xs">{grantedCount}/{PERMISSION_KEYS.length} granted</span>
+                        <td className="px-4 py-4 text-xs text-muted-foreground">
+                          {granted}/{PERMISSION_KEYS.length} granted
                         </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <Button size="sm" variant="outline" onClick={() => {
-                              setEditAdmin(admin);
-                              setEditForm({ full_name: admin.full_name, email: admin.email });
-                            }} className="gap-1.5" title="Edit Profile">
-                              <Edit2 size={14} /> <span className="hidden xl:inline">Edit</span>
+                        <td className="px-4 py-4 text-right">
+                          <div className="flex flex-wrap items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="Edit"
+                              onClick={() => openEdit(admin)}
+                            >
+                              <Edit className="w-4 h-4" />
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => openPerms(admin)} className="gap-1.5" title="Edit Permissions">
-                              <Settings2 size={14} /> <span className="hidden xl:inline">Permissions</span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="Permissions"
+                              onClick={() => {
+                                setPermsAdmin(admin);
+                                setPerms(admin.permissions ?? {});
+                              }}
+                            >
+                              <Settings2 className="w-4 h-4" />
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => setResetPasswordAdmin(admin)} className="gap-1.5" title="Reset Password">
-                              <Key size={14} /> <span className="hidden xl:inline">Reset</span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="Reset password"
+                              onClick={() => {
+                                setResetAdmin(admin);
+                                setNewPassword('');
+                                setConfirmPassword('');
+                              }}
+                            >
+                              <KeyRound className="w-4 h-4" />
                             </Button>
-                            <Button size="sm" variant={admin.status === 'Approved' ? 'secondary' : 'default'} onClick={() => toggleStatus(admin)} className="w-[85px]">
-                              {admin.status === 'Approved' ? 'Suspend' : 'Activate'}
-                            </Button>
-                            <Button size="sm" variant="destructive" onClick={() => setDeleteAdmin(admin)} className="gap-1.5" title="Delete Admin">
-                              <Trash2 size={14} /> <span className="hidden xl:inline">Delete</span>
+                            <select
+                              className="h-8 max-w-[120px] rounded-md border bg-background px-2 text-xs"
+                              value={admin.status || 'Pending'}
+                              title="Change status"
+                              onChange={(e) =>
+                                setStatus(
+                                  admin,
+                                  e.target.value as 'Approved' | 'Pending' | 'Suspended',
+                                )
+                              }
+                            >
+                              <option value="Approved">Approved</option>
+                              <option value="Pending">Pending</option>
+                              <option value="Suspended">Suspended</option>
+                            </select>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive"
+                              title="Remove admin"
+                              onClick={() => removeAdmin(admin)}
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </Button>
                           </div>
                         </td>
                       </tr>
                     );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Add Admin Modal */}
-      {isAddAdminOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-background rounded-2xl shadow-2xl w-full max-w-md border">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-bold flex items-center gap-2"><Plus size={20}/> Create New Admin</h2>
-              <p className="text-sm text-muted-foreground mt-1">Directly add an admin account.</p>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Full Name</label>
-                <Input value={addAdminForm.full_name} onChange={(e) => setAddAdminForm({...addAdminForm, full_name: e.target.value})} placeholder="e.g. John Doe" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Email Address</label>
-                <Input type="email" value={addAdminForm.email} onChange={(e) => setAddAdminForm({...addAdminForm, email: e.target.value})} placeholder="admin@example.com" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Password</label>
-                <Input type="password" value={addAdminForm.password} onChange={(e) => setAddAdminForm({...addAdminForm, password: e.target.value})} placeholder="Min 6 characters" />
-              </div>
-            </div>
-            <div className="p-6 border-t flex gap-3">
-              <Button onClick={handleAddAdmin} disabled={adding || addAdminForm.password.length < 6 || !addAdminForm.email} className="flex-1">
-                {adding ? 'Creating...' : 'Create Admin'}
-              </Button>
-              <Button variant="outline" onClick={() => setIsAddAdminOpen(false)} className="flex-1">Cancel</Button>
-            </div>
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+        </CardContent>
+      </Card>
 
-      {/* Edit Admin Modal */}
-      {editAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-background rounded-2xl shadow-2xl w-full max-w-md border">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-bold flex items-center gap-2"><Edit2 size={20}/> Edit Admin Details</h2>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Full Name</label>
-                <Input value={editForm.full_name} onChange={(e) => setEditForm({...editForm, full_name: e.target.value})} />
+      {/* Add Admin */}
+      {showAdd ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto border-none shadow-lg">
+            <CardContent className="space-y-4 p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold">Add Admin</h2>
+                <Button variant="ghost" size="icon" onClick={() => setShowAdd(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Email Address</label>
-                <Input type="email" value={editForm.email} onChange={(e) => setEditForm({...editForm, email: e.target.value})} />
+              <form className="space-y-4" onSubmit={handleAddAdmin}>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Full Name</label>
+                  <Input
+                    value={addForm.full_name}
+                    onChange={(e) => setAddForm((f) => ({ ...f, full_name: e.target.value }))}
+                    placeholder="Admin name"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Email</label>
+                  <Input
+                    type="email"
+                    value={addForm.email}
+                    onChange={(e) => setAddForm((f) => ({ ...f, email: e.target.value }))}
+                    placeholder="admin@example.com"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Phone</label>
+                  <Input
+                    value={addForm.phone}
+                    onChange={(e) => setAddForm((f) => ({ ...f, phone: e.target.value }))}
+                    placeholder="Optional"
+                  />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Password</label>
+                    <Input
+                      type="password"
+                      value={addForm.password}
+                      onChange={(e) => setAddForm((f) => ({ ...f, password: e.target.value }))}
+                      placeholder="Min 6 characters"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Confirm Password</label>
+                    <Input
+                      type="password"
+                      value={addForm.confirmPassword}
+                      onChange={(e) =>
+                        setAddForm((f) => ({ ...f, confirmPassword: e.target.value }))
+                      }
+                      placeholder="Re-enter password"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={saving}>
+                    {saving ? 'Creating…' : 'Create Admin'}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {/* Edit Admin */}
+      {editing ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto border-none shadow-lg">
+            <CardContent className="space-y-4 p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold">Edit Admin</h2>
+                <Button variant="ghost" size="icon" onClick={() => setEditing(null)}>
+                  <X className="w-4 h-4" />
+                </Button>
               </div>
-            </div>
-            <div className="p-6 border-t flex gap-3">
-              <Button onClick={handleEditAdmin} disabled={editing || !editForm.email || !editForm.full_name} className="flex-1">
-                {editing ? 'Saving...' : 'Save Changes'}
-              </Button>
-              <Button variant="outline" onClick={() => setEditAdmin(null)} className="flex-1">Cancel</Button>
-            </div>
-          </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Full Name</label>
+                  <Input
+                    value={editForm.full_name}
+                    onChange={(e) => setEditForm((f) => ({ ...f, full_name: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Email (login)</label>
+                  <Input
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Phone</label>
+                  <Input
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Status</label>
+                  <select
+                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                    value={editForm.status}
+                    onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}
+                  >
+                    <option value="Approved">Approved</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Suspended">Suspended</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <Button variant="outline" onClick={() => setEditing(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSaveEdit} disabled={saving}>
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-      )}
+      ) : null}
 
-      {/* Permissions Modal */}
-      {selectedAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-background rounded-2xl shadow-2xl w-full max-w-md border">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-bold">Edit Permissions</h2>
-              <p className="text-sm text-muted-foreground mt-1">Setting permissions for <strong>{selectedAdmin.full_name}</strong></p>
-            </div>
-            <div className="p-6 space-y-3 max-h-96 overflow-y-auto">
-              {PERMISSION_KEYS.map(({ key, label }) => (
-                <label key={key} className="flex items-center gap-3 p-3 rounded-xl hover:bg-muted/50 cursor-pointer transition-colors">
-                  <input type="checkbox" checked={!!perms[key]} onChange={(e) => setPerms(prev => ({ ...prev, [key]: e.target.checked }))} className="w-4 h-4 accent-primary cursor-pointer" />
-                  <span className="text-sm font-medium">{label}</span>
-                </label>
-              ))}
-            </div>
-            <div className="p-6 border-t flex gap-3">
-              <Button onClick={savePerms} disabled={saving} className="flex-1">{saving ? 'Saving...' : 'Save Permissions'}</Button>
-              <Button variant="outline" onClick={() => setSelectedAdmin(null)} className="flex-1">Cancel</Button>
-            </div>
-          </div>
+      {/* Permissions */}
+      {permsAdmin ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-md border-none shadow-lg">
+            <CardContent className="space-y-4 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold">Permissions</h2>
+                  <p className="text-sm text-muted-foreground mt-1">{permsAdmin.full_name}</p>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setPermsAdmin(null)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              <div className="max-h-80 space-y-2 overflow-y-auto">
+                {PERMISSION_KEYS.map(({ key, label }) => (
+                  <label
+                    key={key}
+                    className="flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={!!perms[key]}
+                      onChange={(e) => setPerms((p) => ({ ...p, [key]: e.target.checked }))}
+                    />
+                    <span className="text-sm font-medium">{label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex justify-end gap-3">
+                <Button variant="outline" onClick={() => setPermsAdmin(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={savePerms} disabled={saving}>
+                  {saving ? 'Saving…' : 'Save Permissions'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-      )}
+      ) : null}
 
-      {/* Reset Password Modal */}
-      {resetPasswordAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-background rounded-2xl shadow-2xl w-full max-w-md border">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-bold">Reset Password</h2>
-              <p className="text-sm text-muted-foreground mt-1">Setting a new password for <strong>{resetPasswordAdmin.full_name}</strong></p>
-            </div>
-            <div className="p-6 space-y-4">
+      {/* Reset password */}
+      {resetAdmin ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-md border-none shadow-lg">
+            <CardContent className="space-y-4 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold">Reset Password</h2>
+                  <p className="text-sm text-muted-foreground mt-1">{resetAdmin.full_name}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setResetAdmin(null);
+                    setNewPassword('');
+                    setConfirmPassword('');
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">New Password</label>
-                <Input type="password" placeholder="Min 6 characters" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+                <Input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Min 6 characters"
+                />
               </div>
-            </div>
-            <div className="p-6 border-t flex gap-3">
-              <Button onClick={handleResetPassword} disabled={resetting || newPassword.length < 6} className="flex-1">{resetting ? 'Resetting...' : 'Confirm Reset'}</Button>
-              <Button variant="outline" onClick={() => { setResetPasswordAdmin(null); setNewPassword(''); }} className="flex-1">Cancel</Button>
-            </div>
-          </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Confirm Password</label>
+                <Input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter password"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setResetAdmin(null);
+                    setNewPassword('');
+                    setConfirmPassword('');
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={handleResetPassword} disabled={saving}>
+                  {saving ? 'Saving…' : 'Reset Password'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-      )}
-
-      {/* Delete Admin Modal */}
-      {deleteAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-background rounded-2xl shadow-2xl w-full max-w-md border">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-bold text-destructive flex items-center gap-2"><Trash2 size={24} /> Delete Admin?</h2>
-            </div>
-            <div className="p-6">
-              <p className="text-foreground">Are you absolutely sure you want to permanently delete <strong>{deleteAdmin.full_name}</strong>?</p>
-              <p className="text-sm text-muted-foreground mt-2">This action cannot be undone. It will remove their profile and all associated access instantly.</p>
-            </div>
-            <div className="p-6 border-t flex gap-3">
-              <Button variant="destructive" onClick={handleDeleteUser} disabled={deleting} className="flex-1">{deleting ? 'Deleting...' : 'Yes, Delete Permanently'}</Button>
-              <Button variant="outline" onClick={() => setDeleteAdmin(null)} className="flex-1">Cancel</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
