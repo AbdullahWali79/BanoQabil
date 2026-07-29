@@ -16,10 +16,10 @@ export default function StudentProfilePage() {
   const [address, setAddress] = useState('');
   const [fatherName, setFatherName] = useState('');
   const [applicationId, setApplicationId] = useState('');
-  const [courseName, setCourseName] = useState('â€”');
-  const [batchName, setBatchName] = useState('â€”');
-  const [gender, setGender] = useState('â€”');
-  const [status, setStatus] = useState('â€”');
+  const [courseName, setCourseName] = useState('—');
+  const [batchName, setBatchName] = useState('—');
+  const [gender, setGender] = useState('—');
+  const [status, setStatus] = useState('—');
   const [teacher, setTeacher] = useState<TeacherContact | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -43,14 +43,14 @@ export default function StudentProfilePage() {
         setEmail(p.email || user.email || '');
         setPhone(p.phone || '');
         setAddress(p.address || '');
-        setStatus(p.status || 'â€”');
+        setStatus(p.status || '—');
       }
 
       if (ctx) {
         setApplicationId(ctx.applicationId || '');
         setCourseName(ctx.courseName);
         setBatchName(ctx.batchName);
-        setGender(ctx.gender || 'â€”');
+        setGender(ctx.gender || '—');
         setTeacher(ctx.teacher);
       }
 
@@ -121,7 +121,7 @@ export default function StudentProfilePage() {
         <CardContent className="grid gap-3 sm:grid-cols-2 text-sm">
           <div>
             <p className="text-muted-foreground">Application ID</p>
-            <p className="font-mono font-medium">{applicationId || 'â€”'}</p>
+            <p className="font-mono font-medium">{applicationId || '—'}</p>
           </div>
           <div>
             <p className="text-muted-foreground">Status</p>

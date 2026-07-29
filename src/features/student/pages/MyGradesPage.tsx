@@ -92,7 +92,7 @@ export default function MyGradesPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Average Marks</p>
-              <p className="text-2xl font-bold">{average != null ? `${average} / 100` : 'â€”'}</p>
+              <p className="text-2xl font-bold">{average != null ? `${average} / 100` : '—'}</p>
             </div>
           </CardContent>
         </Card>
@@ -103,7 +103,7 @@ export default function MyGradesPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Highest Marks</p>
-              <p className="text-2xl font-bold">{highest != null ? `${highest} / 100` : 'â€”'}</p>
+              <p className="text-2xl font-bold">{highest != null ? `${highest} / 100` : '—'}</p>
             </div>
           </CardContent>
         </Card>
@@ -152,19 +152,19 @@ export default function MyGradesPage() {
                     return (
                       <tr key={row.id} className="border-b">
                         <td className="px-4 py-4 text-muted-foreground">{index + 1}</td>
-                        <td className="px-6 py-4 font-medium">{assignment?.title || 'â€”'}</td>
+                        <td className="px-6 py-4 font-medium">{assignment?.title || '—'}</td>
                         <td className="px-6 py-4 text-muted-foreground">
                           {row.graded_at
                             ? new Date(row.graded_at).toLocaleString()
                             : assignment?.due_date
                               ? new Date(assignment.due_date).toLocaleDateString()
-                              : 'â€”'}
+                              : '—'}
                         </td>
                         <td className={`px-6 py-4 text-base font-bold ${marksTone(marks)}`}>
                           {marks} / 100
                         </td>
                         <td className="px-6 py-4 text-muted-foreground">
-                          {row.remarks || 'â€”'}
+                          {row.remarks || '—'}
                         </td>
                       </tr>
                     );

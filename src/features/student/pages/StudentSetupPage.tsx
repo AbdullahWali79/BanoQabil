@@ -166,7 +166,7 @@ export default function StudentSetupPage() {
         <p className="mt-1 text-muted-foreground">
           {lockedByAdmin
             ? 'Enrollment is managed by admin. You can view your class here.'
-            : 'If admin has not assigned you yet, select your course/batch once â€” then it locks.'}
+            : 'If admin has not assigned you yet, select your course/batch once — then it locks.'}
         </p>
       </div>
 
@@ -175,9 +175,9 @@ export default function StudentSetupPage() {
           <CardContent className="space-y-3 p-6">
             <p className="font-semibold text-emerald-950">You are enrolled</p>
             <p className="text-sm text-emerald-900/80">
-              Course: <strong>{courseName || 'â€”'}</strong>
+              Course: <strong>{courseName || '—'}</strong>
               <br />
-              Batch: <strong>{batchName || 'â€”'}</strong>
+              Batch: <strong>{batchName || '—'}</strong>
             </p>
             <div className="flex flex-wrap gap-2 pt-1">
               <Button asChild size="sm">

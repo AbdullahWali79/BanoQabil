@@ -76,7 +76,7 @@ export default function MySubmissionsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">My Submissions</h1>
         <p className="mt-1 text-muted-foreground">
-          History of work you sent to your teacher â€” including marks once graded.
+          History of work you sent to your teacher — including marks once graded.
         </p>
       </div>
 
@@ -147,7 +147,7 @@ export default function MySubmissionsPage() {
                         <td className="px-6 py-4 font-semibold">
                           {item.marks != null ? `${item.marks} / 100` : 'Awaiting marks'}
                         </td>
-                        <td className="px-6 py-4 text-muted-foreground">{item.remarks || 'â€”'}</td>
+                        <td className="px-6 py-4 text-muted-foreground">{item.remarks || '—'}</td>
                         <td className="px-6 py-4">
                           <div className="flex flex-wrap gap-2">
                             {item.youtube_url && (

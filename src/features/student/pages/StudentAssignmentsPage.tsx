@@ -187,7 +187,7 @@ export default function StudentAssignmentsPage() {
   const handleSubmitLinks = async (assignmentId: string) => {
     if (!studentId) return;
     if (!classTeacher) {
-      setErrorMessage('Cannot submit â€” your course teacher is not assigned yet.');
+      setErrorMessage('Cannot submit — your course teacher is not assigned yet.');
       return;
     }
 
@@ -344,7 +344,7 @@ export default function StudentAssignmentsPage() {
                       <p className="mb-1 text-xs text-muted-foreground">SR# {index + 1}</p>
                       <h2 className="text-lg font-semibold">{assignment.title}</h2>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        Due {dueDate.toLocaleString()} Â· Submit to {teacherName}
+                        Due {dueDate.toLocaleString()} · Submit to {teacherName}
                       </p>
                     </div>
                     <span
@@ -363,7 +363,7 @@ export default function StudentAssignmentsPage() {
                       {isGraded
                         ? 'Graded'
                         : submission
-                          ? 'Submitted â€” awaiting marks'
+                          ? 'Submitted — awaiting marks'
                           : isOverdue
                             ? 'Overdue'
                             : isClosed

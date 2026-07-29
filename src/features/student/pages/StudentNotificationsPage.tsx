@@ -97,12 +97,12 @@ export default function StudentNotificationsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Notifications</h1>
           <p className="mt-1 text-muted-foreground">
             Messages from your course teacher
-            {unreadCount > 0 ? ` Â· ${unreadCount} unread` : ''}.
+            {unreadCount > 0 ? ` · ${unreadCount} unread` : ''}.
           </p>
         </div>
         {unreadCount > 0 ? (
           <Button variant="outline" size="sm" onClick={() => void markAllRead()} disabled={markingAll}>
-            {markingAll ? 'Updatingâ€¦' : 'Mark all read'}
+            {markingAll ? 'Updating…' : 'Mark all read'}
           </Button>
         ) : null}
       </div>
@@ -141,7 +141,7 @@ export default function StudentNotificationsPage() {
                         {n.message}
                       </p>
                       <p className="mt-2 text-xs text-muted-foreground">
-                        From: {n.senderName} Â· {new Date(n.created_at).toLocaleString()}
+                        From: {n.senderName} · {new Date(n.created_at).toLocaleString()}
                       </p>
                     </div>
                     {!n.is_read ? (

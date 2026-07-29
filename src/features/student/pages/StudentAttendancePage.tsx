@@ -78,7 +78,7 @@ export default function StudentAttendancePage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Attendance</h1>
         <p className="mt-1 text-muted-foreground">
-          Marked by your course teacher â€” percentage and day-wise history.
+          Marked by your course teacher — percentage and day-wise history.
         </p>
       </div>
 
@@ -93,7 +93,7 @@ export default function StudentAttendancePage() {
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">Attendance %</p>
             <p className="mt-1 text-2xl font-bold">
-              {stats.pct == null ? 'â€”' : `${stats.pct}%`}
+              {stats.pct == null ? '—' : `${stats.pct}%`}
             </p>
           </CardContent>
         </Card>
@@ -187,7 +187,7 @@ export default function StudentAttendancePage() {
                           {r.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{r.notes || 'â€”'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{r.notes || '—'}</td>
                     </tr>
                   ))
                 )}

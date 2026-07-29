@@ -146,7 +146,7 @@ export default function MyClassPage() {
         return {
           ...s,
           batchLabel: cleanBatchDisplayName(batch?.name),
-          courseLabel: course?.name || 'â€”',
+          courseLabel: course?.name || '—',
           profile,
           resolvedGender: resolveStudentGender({
             gender: s.gender,
@@ -158,12 +158,12 @@ export default function MyClassPage() {
   );
 
   const courseOptions = useMemo(() => {
-    const set = new Set(enriched.map((s) => s.courseLabel).filter((n) => n && n !== 'â€”'));
+    const set = new Set(enriched.map((s) => s.courseLabel).filter((n) => n && n !== '—'));
     return ['All', ...[...set].sort()];
   }, [enriched]);
 
   const batchOptions = useMemo(() => {
-    const set = new Set(enriched.map((s) => s.batchLabel).filter((n) => n && n !== 'â€”'));
+    const set = new Set(enriched.map((s) => s.batchLabel).filter((n) => n && n !== '—'));
     return ['All', ...[...set].sort()];
   }, [enriched]);
 
@@ -253,21 +253,21 @@ export default function MyClassPage() {
   };
 
   return (
-    <TeacherAssignmentGate courseName={courseName} genderScope={genderScope}>
+    <TeacherAssignmentGate courseName={courseName} genderScope={genderScope} loading={loading}>
       <div className="space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">My Classes</h1>
             <p className="mt-1 text-muted-foreground">
               {courseName
-                ? `${courseName}${genderScope ? ` Â· ${genderScope}` : ''}`
+                ? `${courseName}${genderScope ? ` · ${genderScope}` : ''}`
                 : 'Full student records for your class'}
             </p>
           </div>
           <p className="text-sm text-muted-foreground">
             Showing <span className="font-semibold text-foreground">{filtered.length}</span> student
             {filtered.length === 1 ? '' : 's'}
-            {filtered.length > PAGE_SIZE ? ` Â· page ${currentPage}/${totalPages}` : ''}
+            {filtered.length > PAGE_SIZE ? ` · page ${currentPage}/${totalPages}` : ''}
           </p>
         </div>
 
@@ -339,31 +339,25 @@ export default function MyClassPage() {
           </select>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[1.65fr_1fr]">
-          <Card>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,1fr)]">
+          <Card className="overflow-hidden">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                <table className="w-full min-w-[920px] text-left text-sm">
+                  <thead className="border-b bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-3 py-3">SR#</th>
-                      <th className="px-3 py-3">App ID</th>
-                      <th className="px-3 py-3">Name</th>
-                      <th className="px-3 py-3">Phone</th>
-                      <th className="px-3 py-3">Course</th>
-                      <th className="px-3 py-3">Batch</th>
-                      <th className="px-3 py-3">Gender</th>
-                      <th className="px-3 py-3">Status</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">SR#</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">App ID</th>
+                      <th className="min-w-[9rem] px-3 py-3 font-semibold">Name</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Phone</th>
+                      <th className="min-w-[8rem] px-3 py-3 font-semibold">Course</th>
+                      <th className="min-w-[8rem] px-3 py-3 font-semibold">Batch</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Gender</th>
+                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Status</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {loading ? (
-                      <tr>
-                        <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
-                          Loading class rosterâ€¦
-                        </td>
-                      </tr>
-                    ) : pageRows.length === 0 ? (
+                  <tbody className="divide-y">
+                    {pageRows.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                           <Users className="mx-auto mb-2 h-10 w-10 opacity-30" />
@@ -376,29 +370,39 @@ export default function MyClassPage() {
                         return (
                           <tr
                             key={s.id}
-                            className={`cursor-pointer border-b transition-colors ${
+                            className={`cursor-pointer transition-colors ${
                               selectedId === s.id ? 'bg-primary/10' : 'hover:bg-muted/40'
                             }`}
                             onClick={() => setSelectedId(s.id)}
                           >
-                            <td className="px-3 py-3 text-muted-foreground">{sr}</td>
-                            <td className="px-3 py-3 font-mono text-xs">
-                              {s.application_id || 'â€”'}
+                            <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
+                              {sr}
                             </td>
-                            <td className="px-3 py-3 font-medium">
-                              {s.profile?.full_name || 'â€”'}
+                            <td className="whitespace-nowrap px-3 py-3 font-mono text-xs">
+                              {s.application_id || '—'}
                             </td>
-                            <td className="px-3 py-3">{s.profile?.phone || 'â€”'}</td>
-                            <td className="px-3 py-3 text-xs">{s.courseLabel}</td>
-                            <td className="px-3 py-3 text-xs">{s.batchLabel}</td>
-                            <td className="px-3 py-3 text-xs">{s.resolvedGender}</td>
-                            <td className="px-3 py-3">
+                            <td className="max-w-[12rem] truncate px-3 py-3 font-medium" title={s.profile?.full_name || undefined}>
+                              {s.profile?.full_name || '—'}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                              {s.profile?.phone || '—'}
+                            </td>
+                            <td className="max-w-[10rem] truncate px-3 py-3 text-xs" title={s.courseLabel}>
+                              {s.courseLabel}
+                            </td>
+                            <td className="max-w-[11rem] truncate px-3 py-3 text-xs" title={s.batchLabel}>
+                              {s.batchLabel}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-xs">
+                              {s.resolvedGender}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3">
                               <span
                                 className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-medium ${statusClass(
                                   s.profile?.status,
                                 )}`}
                               >
-                                {s.profile?.status || 'â€”'}
+                                {s.profile?.status || '—'}
                               </span>
                             </td>
                           </tr>
@@ -412,7 +416,7 @@ export default function MyClassPage() {
               {filtered.length > PAGE_SIZE ? (
                 <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-muted-foreground">
-                    {(currentPage - 1) * PAGE_SIZE + 1}â€“
+                    {(currentPage - 1) * PAGE_SIZE + 1}—
                     {Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length}
                   </p>
                   <div className="flex items-center gap-2">
@@ -457,7 +461,7 @@ export default function MyClassPage() {
                   <div>
                     <p className="text-muted-foreground">Full Name</p>
                     <p className="text-base font-semibold">
-                      {selected.profile?.full_name || 'â€”'}
+                      {selected.profile?.full_name || '—'}
                     </p>
                   </div>
 
@@ -465,7 +469,7 @@ export default function MyClassPage() {
                     <div>
                       <p className="text-muted-foreground">App ID</p>
                       <div className="mt-0.5 flex items-center gap-1.5">
-                        <p className="font-mono text-xs">{selected.application_id || 'â€”'}</p>
+                        <p className="font-mono text-xs">{selected.application_id || '—'}</p>
                         {selected.application_id ? (
                           <button
                             type="button"
@@ -496,7 +500,7 @@ export default function MyClassPage() {
                           {selected.profile.email}
                         </a>
                       ) : (
-                        <p>â€”</p>
+                        <p>—</p>
                       )}
                     </div>
                     <div>
@@ -510,12 +514,12 @@ export default function MyClassPage() {
                           {selected.profile.phone}
                         </a>
                       ) : (
-                        <p>â€”</p>
+                        <p>—</p>
                       )}
                     </div>
                     <div>
                       <p className="text-muted-foreground">Father Name</p>
-                      <p>{selected.father_name || 'â€”'}</p>
+                      <p>{selected.father_name || '—'}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Status</p>
@@ -524,7 +528,7 @@ export default function MyClassPage() {
                           selected.profile?.status,
                         )}`}
                       >
-                        {selected.profile?.status || 'â€”'}
+                        {selected.profile?.status || '—'}
                       </span>
                     </div>
                     <div>
@@ -537,13 +541,13 @@ export default function MyClassPage() {
                     </div>
                     <div className="col-span-2">
                       <p className="text-muted-foreground">Enrollment</p>
-                      <p>{selected.enrollment_date || 'â€”'}</p>
+                      <p>{selected.enrollment_date || '—'}</p>
                     </div>
                   </div>
 
                   <div>
                     <p className="text-muted-foreground">Address</p>
-                    <p>{selected.profile?.address || 'â€”'}</p>
+                    <p>{selected.profile?.address || '—'}</p>
                   </div>
 
                   <div className="grid gap-2 border-t pt-3">
@@ -567,7 +571,7 @@ export default function MyClassPage() {
                     </Button>
                     {!selected.profile?.id ? (
                       <p className="text-xs text-muted-foreground">
-                        Notification unavailable â€” student profile id missing.
+                        Notification unavailable — student profile id missing.
                       </p>
                     ) : null}
                   </div>

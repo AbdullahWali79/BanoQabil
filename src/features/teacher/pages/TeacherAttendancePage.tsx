@@ -224,13 +224,13 @@ export default function TeacherAttendancePage() {
   };
 
   return (
-    <TeacherAssignmentGate courseName={courseName} genderScope={genderScope}>
+    <TeacherAssignmentGate courseName={courseName} genderScope={genderScope} loading={loading}>
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Attendance</h1>
           <p className="text-muted-foreground mt-1">
-            Pick any date â€” today or past â€” then Save to update. Female and Male are marked separately.
+            Pick any date — today or past — then Save to update. Female and Male are marked separately.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -278,7 +278,7 @@ export default function TeacherAttendancePage() {
 
       {focusQuery ? (
         <p className="text-sm text-muted-foreground">
-          Opened from My Class â€” highlighting student match for{' '}
+          Opened from My Class — highlighting student match for{' '}
           <span className="font-medium text-foreground">{focusQuery}</span>.
           <button
             type="button"
@@ -298,7 +298,7 @@ export default function TeacherAttendancePage() {
           Mark {genderTab} Absent
         </Button>
         <div className="text-sm text-muted-foreground self-center ml-2">
-          {genderTab}: P {summary.present} Â· A {summary.absent} Â· L {summary.late} Â· E{' '}
+          {genderTab}: P {summary.present} · A {summary.absent} · L {summary.late} · E{' '}
           {summary.excused}
         </div>
       </div>
@@ -347,7 +347,7 @@ export default function TeacherAttendancePage() {
                           <div className="font-medium">{p?.full_name || 'Unknown'}</div>
                           <div className="text-xs text-muted-foreground">{p?.email}</div>
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs">{s.application_id || 'â€”'}</td>
+                        <td className="px-4 py-3 font-mono text-xs">{s.application_id || '—'}</td>
                         <td className="px-4 py-3">
                           <select
                             className="h-9 rounded-md border bg-background px-2 text-sm"
@@ -367,7 +367,7 @@ export default function TeacherAttendancePage() {
                           </select>
                         </td>
                         <td className="px-4 py-3 font-semibold">
-                          {pct == null ? 'â€”' : `${pct}%`}
+                          {pct == null ? '—' : `${pct}%`}
                           {st?.total ? (
                             <span className="ml-1 text-xs font-normal text-muted-foreground">
                               ({st.present}/{st.total})

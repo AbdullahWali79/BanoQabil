@@ -19,7 +19,7 @@ type Student = {
 };
 
 function cleanBatch(name?: string | null) {
-  return (name || '').replace(/^tid:[a-f0-9-]+\|/i, '') || 'â€”';
+  return (name || '').replace(/^tid:[a-f0-9-]+\|/i, '') || '—';
 }
 
 export default function TeacherStudentsPage() {
@@ -118,13 +118,13 @@ export default function TeacherStudentsPage() {
                     const course = relationOne(s.courses);
                     return (
                       <tr key={s.id} className="border-b">
-                        <td className="px-4 py-3 font-mono text-xs">{s.application_id || 'â€”'}</td>
-                        <td className="px-4 py-3 font-medium">{p?.full_name || 'â€”'}</td>
-                        <td className="px-4 py-3">{p?.email || 'â€”'}</td>
-                        <td className="px-4 py-3">{p?.phone || 'â€”'}</td>
-                        <td className="px-4 py-3 text-xs">{course?.name || 'â€”'}</td>
+                        <td className="px-4 py-3 font-mono text-xs">{s.application_id || '—'}</td>
+                        <td className="px-4 py-3 font-medium">{p?.full_name || '—'}</td>
+                        <td className="px-4 py-3">{p?.email || '—'}</td>
+                        <td className="px-4 py-3">{p?.phone || '—'}</td>
+                        <td className="px-4 py-3 text-xs">{course?.name || '—'}</td>
                         <td className="px-4 py-3 text-xs">{cleanBatch(batch?.name)}</td>
-                        <td className="px-4 py-3 text-xs">{p?.status || 'â€”'}</td>
+                        <td className="px-4 py-3 text-xs">{p?.status || '—'}</td>
                       </tr>
                     );
                   })

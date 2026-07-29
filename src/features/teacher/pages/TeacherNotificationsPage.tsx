@@ -206,7 +206,7 @@ export default function TeacherNotificationsPage() {
 
   const recipientName = (recipientId: string) => {
     const hit = enriched.find((s) => s.profile?.id === recipientId);
-    return hit?.profile?.full_name || hit?.profile?.email || recipientId.slice(0, 8) + 'â€¦';
+    return hit?.profile?.full_name || hit?.profile?.email || recipientId.slice(0, 8) + '…';
   };
 
   return (
@@ -293,7 +293,7 @@ export default function TeacherNotificationsPage() {
                               <div className="font-medium">{s.profile?.full_name}</div>
                               <div className="text-xs text-muted-foreground">{s.profile?.email}</div>
                             </td>
-                            <td className="px-3 py-2 font-mono text-xs">{s.application_id || 'â€”'}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{s.application_id || '—'}</td>
                             <td className="px-3 py-2">
                               <input
                                 type="radio"
@@ -375,7 +375,7 @@ export default function TeacherNotificationsPage() {
                         <p className="font-medium">{n.title}</p>
                         <p className="text-sm text-muted-foreground mt-1">{n.message}</p>
                         <p className="text-xs text-muted-foreground mt-2">
-                          To: {recipientName(n.recipient_id)} Â·{' '}
+                          To: {recipientName(n.recipient_id)} ·{' '}
                           {new Date(n.created_at).toLocaleString()}
                         </p>
                       </div>

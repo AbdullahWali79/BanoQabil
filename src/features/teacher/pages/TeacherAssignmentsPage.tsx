@@ -148,7 +148,7 @@ export default function TeacherAssignmentsPage() {
   };
 
   return (
-    <TeacherAssignmentGate courseName={courseName} genderScope={genderScope}>
+    <TeacherAssignmentGate courseName={courseName} genderScope={genderScope} loading={loading}>
     <div className="space-y-6">
       <div className="flex justify-between items-center gap-4 flex-wrap">
         <div>
