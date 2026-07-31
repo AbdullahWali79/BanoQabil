@@ -2,7 +2,7 @@
 -- BanoQabil: optional demo Teacher / Student ONLY (no demo Admin)
 -- ============================================================
 -- Real accounts:
---   Super Admin: superadmin@gmail.com / password123  → sql/ops/cleanup_demo_admins.sql
+--   Super Admin: chief_thevehari@live.com / password123  → sql/ops/cleanup_demo_admins.sql
 --   Admin:       abdullahwali79@gmail.com
 --
 -- Optional (if auth users already exist):

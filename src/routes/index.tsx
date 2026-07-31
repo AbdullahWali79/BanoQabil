@@ -112,7 +112,7 @@ const router = createBrowserRouter([
       // Admin + Super Admin (students approve by Admin; teachers approve/reject by Super Admin)
       { path: 'approvals', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><PendingApprovalsPage /></ProtectedRoute> },
       { path: 'teachers', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><Lazy><ManageTeachersPage /></Lazy></ProtectedRoute> },
-      { path: 'students', element: <ProtectedRoute allowedRoles={['Admin']}><Lazy><ManageStudentsPage /></Lazy></ProtectedRoute> },
+      { path: 'students', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><Lazy><ManageStudentsPage /></Lazy></ProtectedRoute> },
       { path: 'courses', element: <ProtectedRoute allowedRoles={['Admin']}><Lazy><CoursesPage /></Lazy></ProtectedRoute> },
       { path: 'fees', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><Lazy><StudentFeesPage /></Lazy></ProtectedRoute> },
       { path: 'reports', element: <ProtectedRoute allowedRoles={['Admin']}><Lazy><ReportsPage /></Lazy></ProtectedRoute> },

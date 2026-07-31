@@ -1,5 +1,5 @@
 /** Only this email may use the Super Admin panel. */
-export const SUPER_ADMIN_EMAIL = 'superadmin@gmail.com';
+export const SUPER_ADMIN_EMAIL = 'chief_thevehari@live.com';
 
 /** Real operational Admin (not a demo account). */
 export const PRIMARY_ADMIN_EMAIL = 'abdullahwali79@gmail.com';

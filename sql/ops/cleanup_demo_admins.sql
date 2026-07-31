@@ -1,9 +1,10 @@
 -- ============================================================
 -- Cleanup demo admins + lock real accounts
 -- KEEP:
---   Super Admin → superadmin@gmail.com / password123  (only one)
---   Admin       → abdullahwali79@gmail.com             (only one)
+--   Super Admin → chief_thevehari@live.com / password123  (only one)
+--   Admin       → abdullahwali79@gmail.com                 (only one)
 -- REMOVE:
+--   superadmin@gmail.com (legacy)
 --   admin123@gmail.com and any other demo / extra Admin or Super Admin accounts
 -- ============================================================
 -- Run in Supabase → SQL Editor
@@ -20,12 +21,12 @@ insert into public.roles (name)
 select 'Admin'
 where not exists (select 1 from public.roles where name = 'Admin');
 
--- 2) Delete DEMO / extra admin auth users (NOT abdullahwali79, NOT superadmin)
+-- 2) Delete DEMO / extra admin auth users (NOT abdullahwali79, NOT principal)
 do $$
 declare
   r record;
   keep_emails text[] := array[
-    'superadmin@gmail.com',
+    'chief_thevehari@live.com',
     'abdullahwali79@gmail.com'
   ];
 begin
@@ -35,15 +36,14 @@ begin
     left join public.profiles p on p.id = u.id
     left join public.roles role on role.id = p.role_id
     where
-      -- known demo admin
-      lower(u.email) = 'admin123@gmail.com'
+      -- legacy / demo accounts
+      lower(u.email) in ('admin123@gmail.com', 'superadmin@gmail.com')
       -- or any Admin / Super Admin that is NOT in keep list
       or (
         coalesce(role.name, '') in ('Admin', 'Super Admin')
         and lower(u.email) <> all (keep_emails)
       )
   loop
-    -- membership rows first (if any)
     delete from public.teachers where profile_id = r.id;
     delete from public.students where profile_id = r.id;
     delete from public.profiles where id = r.id;
@@ -53,10 +53,10 @@ begin
   end loop;
 end $$;
 
--- 3) Ensure Super Admin auth user: superadmin@gmail.com / password123
+-- 3) Ensure Super Admin auth user: chief_thevehari@live.com / password123
 do $$
 declare
-  v_email text := 'superadmin@gmail.com';
+  v_email text := 'chief_thevehari@live.com';
   v_password text := 'password123';
   v_user_id uuid;
   v_role_id uuid;
@@ -82,7 +82,7 @@ begin
       v_encrypted_pw,
       now(),
       '{"provider":"email","providers":["email"]}'::jsonb,
-      '{"full_name":"Super Admin","role":"Super Admin"}'::jsonb,
+      '{"full_name":"Principal","role":"Super Admin"}'::jsonb,
       now(), now(), '', '', '', ''
     );
   else
@@ -92,7 +92,7 @@ begin
       email_confirmed_at = coalesce(email_confirmed_at, now()),
       raw_user_meta_data =
         coalesce(raw_user_meta_data, '{}'::jsonb)
-        || '{"full_name":"Super Admin","role":"Super Admin"}'::jsonb,
+        || '{"full_name":"Principal","role":"Super Admin"}'::jsonb,
       updated_at = now()
     where id = v_user_id;
   end if;
@@ -114,11 +114,11 @@ begin
   end if;
 
   insert into public.profiles (id, email, full_name, status, role_id)
-  values (v_user_id, v_email, 'Super Admin', 'Approved', v_role_id)
+  values (v_user_id, v_email, 'Principal', 'Approved', v_role_id)
   on conflict (id) do update
   set
     email = v_email,
-    full_name = 'Super Admin',
+    full_name = 'Principal',
     status = 'Approved',
     role_id = v_role_id;
 end $$;
@@ -187,13 +187,13 @@ begin
     role_id = v_role_id;
 end $$;
 
--- 5) Safety: any remaining Super Admin role except superadmin → Admin (should be none)
+-- 5) Safety: any remaining Super Admin role except principal → Admin
 update public.profiles p
 set role_id = (select id from public.roles where name = 'Admin' limit 1)
 from public.roles r
 where r.id = p.role_id
   and r.name = 'Super Admin'
-  and lower(coalesce(p.email, '')) <> 'superadmin@gmail.com';
+  and lower(coalesce(p.email, '')) <> 'chief_thevehari@live.com';
 
 -- 6) Verify
 select
@@ -205,5 +205,10 @@ from auth.users u
 left join public.profiles p on p.id = u.id
 left join public.roles r on r.id = p.role_id
 where coalesce(r.name, '') in ('Admin', 'Super Admin')
-   or lower(u.email) in ('superadmin@gmail.com', 'abdullahwali79@gmail.com', 'admin123@gmail.com')
+   or lower(u.email) in (
+     'chief_thevehari@live.com',
+     'superadmin@gmail.com',
+     'abdullahwali79@gmail.com',
+     'admin123@gmail.com'
+   )
 order by r.name nulls last, email;
