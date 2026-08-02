@@ -1,19 +1,34 @@
-# Admin password reset (Edge Function)
+# Admin password / email update (Edge Function)
 
-Direct password set/reset needs the service role, so it runs in this Edge Function (not in the browser).
+Browser cannot use the service role. This function updates Auth password/email securely.
 
-## Deploy once
+## Important
+
+- **Vercel deploy ≠ Edge Function deploy**
+- You must deploy this function on **Supabase**, not only the React app.
+
+## Deploy (CLI)
 
 ```bash
-# from project root (requires Supabase CLI logged in)
+supabase login
+supabase link --project-ref YOUR_PROJECT_REF
 supabase functions deploy admin-set-password
 ```
 
-Or in Supabase Dashboard → Edge Functions → create `admin-set-password` and paste
-`supabase/functions/admin-set-password/index.ts`.
+## Deploy (Dashboard)
+
+1. Open Supabase project → **Edge Functions**
+2. Create function named exactly: `admin-set-password`
+3. Paste code from `index.ts`
+4. Deploy
+5. Confirm URL works:  
+   `https://YOUR_PROJECT.supabase.co/functions/v1/admin-set-password`
 
 ## After deploy
 
-Admin → Manage Teachers → key icon → **Set New Password** works.
+Admin / Super Admin → Manage Teachers → key icon → **Set New Password**
 
-If function is not deployed yet, use **Send Reset Email Instead**.
+## Check JWT setting
+
+In function settings, **Verify JWT with legacy secret** can stay ON.  
+App sends the logged-in Admin access token.

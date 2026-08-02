@@ -1,16 +1,27 @@
-// Supabase Edge Function: admin updates another user's password and/or email
-// Deploy:
-//   supabase functions deploy admin-set-password
+/// <reference path="../deno-shim.d.ts" />
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 
-const corsHeaders = {
+const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-supabase-api-version, x-supabase-authorization',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-Deno.serve(async (req) => {
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
+  }
+
+  if (req.method !== 'POST') {
+    return json({ error: 'Method not allowed' }, 405);
   }
 
   try {
@@ -19,135 +30,141 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
     if (!supabaseUrl || !anonKey || !serviceKey) {
-      return new Response(JSON.stringify({ error: 'Server misconfigured' }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return json({ error: 'Server misconfigured (missing env)' }, 500);
     }
 
     const authHeader = req.headers.get('Authorization') || '';
+    const jwt = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!jwt) {
+      return json({ error: 'Unauthorized — missing access token' }, 401);
+    }
+
     const caller = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
     });
 
     const {
       data: { user: adminUser },
       error: userError,
-    } = await caller.auth.getUser();
+    } = await caller.auth.getUser(jwt);
 
     if (userError || !adminUser) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return json({ error: 'Unauthorized — invalid session' }, 401);
     }
 
-    const { data: profile } = await caller
+    // Resolve role without fragile nested embed
+    const { data: profile, error: profileError } = await caller
       .from('profiles')
-      .select('status, roles(name)')
+      .select('status, role_id')
       .eq('id', adminUser.id)
-      .limit(1);
+      .maybeSingle();
 
-    const row = profile?.[0] as Record<string, unknown> | undefined;
-    const roles = row?.roles as { name?: string } | { name?: string }[] | null | undefined;
-    const roleName = Array.isArray(roles) ? roles[0]?.name : roles?.name;
+    if (profileError || !profile) {
+      return json({ error: 'Caller profile not found' }, 403);
+    }
+
+    const { data: roleRow } = await caller
+      .from('roles')
+      .select('name')
+      .eq('id', profile.role_id)
+      .maybeSingle();
+
+    const roleName = roleRow?.name || '';
     const allowed =
-      row?.status === 'Approved' &&
+      profile.status === 'Approved' &&
       (roleName === 'Admin' || roleName === 'Super Admin');
 
-    if (!allowed) {
-      return new Response(JSON.stringify({ error: 'Only admins can update users' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    // Email lock backup (principal always treated as Super Admin for this API)
+    const email = String(adminUser.email || '').trim().toLowerCase();
+    const isPrincipal = email === 'chief_thevehari@live.com';
+    const isPrimaryAdmin = email === 'abdullahwali79@gmail.com';
+    const canCall =
+      allowed ||
+      (profile.status === 'Approved' && (isPrincipal || isPrimaryAdmin));
 
-    const body = await req.json();
-    const userId = String(body.userId || '').trim();
-    const password = String(body.password || '');
-    const email = String(body.email || '').trim().toLowerCase();
-
-    if (!userId) {
-      return new Response(JSON.stringify({ error: 'userId is required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    if (!email && password.length < 6) {
-      return new Response(
-        JSON.stringify({
-          error: 'Provide password (min 6 chars) and/or a valid email to update',
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
+    if (!canCall) {
+      return json(
+        { error: `Only Admin/Super Admin can update users (role=${roleName || 'none'})` },
+        403,
       );
     }
 
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return new Response(JSON.stringify({ error: 'Invalid email address' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    const effectiveRole = isPrincipal
+      ? 'Super Admin'
+      : roleName === 'Super Admin'
+        ? 'Super Admin'
+        : 'Admin';
+
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const userId = String(body.userId || '').trim();
+    const password = String(body.password || '');
+    const newEmail = String(body.email || '').trim().toLowerCase();
+
+    if (!userId) {
+      return json({ error: 'userId is required' }, 400);
+    }
+
+    if (!newEmail && password.length < 6) {
+      return json(
+        { error: 'Provide password (min 6 chars) and/or a valid email to update' },
+        400,
+      );
+    }
+
+    if (newEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      return json({ error: 'Invalid email address' }, 400);
     }
 
     // Teacher email changes: Super Admin only (Admin may still reset passwords)
-    if (email) {
+    if (newEmail) {
       const { data: targetProfile } = await caller
         .from('profiles')
-        .select('roles(name)')
+        .select('role_id')
         .eq('id', userId)
-        .limit(1);
-      const targetRow = targetProfile?.[0] as Record<string, unknown> | undefined;
-      const targetRoles = targetRow?.roles as
-        | { name?: string }
-        | { name?: string }[]
-        | null
-        | undefined;
-      const targetRoleName = Array.isArray(targetRoles) ? targetRoles[0]?.name : targetRoles?.name;
-      if (targetRoleName === 'Teacher' && roleName !== 'Super Admin') {
-        return new Response(
-          JSON.stringify({ error: 'Only Super Admin can change teacher email' }),
-          {
-            status: 403,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          },
-        );
+        .maybeSingle();
+
+      let targetRoleName = '';
+      if (targetProfile?.role_id) {
+        const { data: tr } = await caller
+          .from('roles')
+          .select('name')
+          .eq('id', targetProfile.role_id)
+          .maybeSingle();
+        targetRoleName = tr?.name || '';
+      }
+
+      if (targetRoleName === 'Teacher' && effectiveRole !== 'Super Admin') {
+        return json({ error: 'Only Super Admin can change teacher email' }, 403);
       }
     }
 
     const admin = createClient(supabaseUrl, serviceKey);
     const patch: { password?: string; email?: string; email_confirm?: boolean } = {};
     if (password.length >= 6) patch.password = password;
-    if (email) {
-      patch.email = email;
+    if (newEmail) {
+      patch.email = newEmail;
       patch.email_confirm = true;
     }
 
     const { data, error } = await admin.auth.admin.updateUserById(userId, patch);
 
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return json({ error: error.message }, 400);
     }
 
-    if (email) {
-      await admin.from('profiles').update({ email }).eq('id', userId);
+    if (newEmail) {
+      await admin.from('profiles').update({ email: newEmail }).eq('id', userId);
     }
 
-    return new Response(JSON.stringify({ ok: true, userId: data.user?.id, email: email || null }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json({ ok: true, userId: data.user?.id, email: newEmail || null });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unexpected error';
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json({ error: message }, 500);
   }
 });

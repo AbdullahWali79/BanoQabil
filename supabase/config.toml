@@ -1,0 +1,7 @@
+# A config file for Supabase CLI / Edge Functions
+# https://supabase.com/docs/guides/cli/config
+
+[functions.admin-set-password]
+# JWT is validated inside the function (getUser). Gateway verify can fail after key rotation
+# and surface as "Failed to send a request to the Edge Function".
+verify_jwt = false
