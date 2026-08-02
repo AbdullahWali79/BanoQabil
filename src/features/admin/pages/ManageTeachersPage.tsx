@@ -19,7 +19,6 @@ import { ensureTeacherRow, relationOne, setTeacherCourseAssignment, type GenderS
 import {
   adminSetUserPassword,
   adminSetUserEmail,
-  sendTeacherPasswordResetEmail,
 } from '@/lib/adminPassword';
 import { useAuthStore } from '@/store/authStore';
 import { effectiveAppRole } from '@/lib/roles';
@@ -564,26 +563,8 @@ export default function ManageTeachersPage() {
         type: 'error',
         text:
           err?.message ||
-          'Direct password reset failed. Deploy edge function admin-set-password, or use Send Reset Email.',
+          'Password reset failed. Deploy edge function admin-set-password.',
       });
-    } finally {
-      setResetting(false);
-    }
-  };
-
-  const handleSendResetEmail = async () => {
-    if (!resetTarget?.profiles?.email) return;
-    setResetting(true);
-    setMessage(null);
-    try {
-      await sendTeacherPasswordResetEmail(resetTarget.profiles.email);
-      setMessage({
-        type: 'success',
-        text: `Password reset email sent to ${resetTarget.profiles.email}.`,
-      });
-      setResetTarget(null);
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err?.message || 'Failed to send reset email.' });
     } finally {
       setResetting(false);
     }
@@ -1487,9 +1468,6 @@ export default function ManageTeachersPage() {
               <div className="flex flex-col gap-2 pt-2">
                 <Button onClick={handleResetPassword} disabled={resetting}>
                   {resetting ? 'Updating...' : 'Set New Password'}
-                </Button>
-                <Button variant="outline" onClick={handleSendResetEmail} disabled={resetting}>
-                  Send Reset Email Instead
                 </Button>
                 <Button variant="ghost" onClick={() => setResetTarget(null)} disabled={resetting}>
                   Cancel
