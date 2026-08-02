@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
+import { toastError, toastSuccess } from '@/lib/notify';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,7 +23,6 @@ export default function StudentProfilePage() {
   const [status, setStatus] = useState('—');
   const [teacher, setTeacher] = useState<TeacherContact | null>(null);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -64,7 +64,6 @@ export default function StudentProfilePage() {
   const saveProfile = async () => {
     if (!user?.id) return;
     setSaving(true);
-    setMessage(null);
     const { error } = await supabase
       .from('profiles')
       .update({
@@ -75,13 +74,13 @@ export default function StudentProfilePage() {
       .eq('id', user.id);
 
     if (error) {
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Profile update failed.');
     } else {
       await supabase
         .from('students')
         .update({ father_name: fatherName.trim() || null })
         .eq('profile_id', user.id);
-      setMessage({ type: 'success', text: 'Profile updated.' });
+      toastSuccess('Profile updated.');
     }
     setSaving(false);
   };
@@ -99,18 +98,6 @@ export default function StudentProfilePage() {
           <Link to="/dashboard/settings">Password & Settings</Link>
         </Button>
       </div>
-
-      {message && (
-        <div
-          className={`rounded-md border px-4 py-3 text-sm ${
-            message.type === 'success'
-              ? 'border-green-300 bg-green-50 text-green-700'
-              : 'border-destructive/40 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
 
       <TeacherInfoCard teacher={teacher} courseName={courseName} batchName={batchName} />
 

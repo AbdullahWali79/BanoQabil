@@ -1,12 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { toastSuccess, toastError } from '@/lib/notify';
+import {
+  createReportDoc,
+  defaultTableStyles,
+  moneyPKR,
+  paintFooters,
+  paintReportHeader,
+  paintSummaryBar,
+} from '@/lib/reportPdf';
+import { usePermission } from '@/hooks/usePermission';
 import { useAuthStore } from '@/store/authStore';
 import { effectiveAppRole } from '@/lib/roles';
 import { relationOne } from '@/features/teacher/utils/teacherData';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
+import { AccessDenied } from '@/components/layout/AccessDenied';
 import {
+  FileDown,
   Filter,
   History,
   MessageCircle,
@@ -91,7 +103,7 @@ function whatsappNumber(phone: string | null | undefined): string | null {
 function openWhatsAppPending(phone: string | null, name: string, pending: number, course: string) {
   const num = whatsappNumber(phone);
   if (!num) {
-    alert('Valid phone number not found for WhatsApp.');
+    toastError('Valid phone number not found for WhatsApp.');
     return;
   }
   const text = encodeURIComponent(
@@ -104,6 +116,8 @@ export default function StudentFeesPage() {
   const { user, role } = useAuthStore();
   const appRole = effectiveAppRole(user?.email, role);
   const canManage = appRole === 'Admin' || appRole === 'Super Admin';
+  const { can: canPerm, denyMessage } = usePermission();
+  const canExport = canPerm('can_export_pdf');
 
   const initial = currentYearMonth();
   const [year, setYear] = useState(initial.year);
@@ -116,10 +130,11 @@ export default function StudentFeesPage() {
   const [appIdSearch, setAppIdSearch] = useState('');
   const [courseFilter, setCourseFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Pending' | 'Cleared' | 'Free'>('All');
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
-    null,
-  );
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [showFeeExport, setShowFeeExport] = useState(false);
+  const [exportScope, setExportScope] = useState<'pending' | 'all'>('pending');
+  const [exportMonthValue, setExportMonthValue] = useState(toMonthInputValue(initial.year, initial.month));
+  const [exportingFee, setExportingFee] = useState(false);
 
   const [historyStudent, setHistoryStudent] = useState<StudentFeeRow | null>(null);
   const [payModal, setPayModal] = useState<{
@@ -132,7 +147,6 @@ export default function StudentFeesPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    setMessage(null);
     try {
       const selectWithFree = `
               id,
@@ -257,13 +271,7 @@ export default function StudentFeesPage() {
       setStudents([]);
       setPayments([]);
       setCourses([]);
-      setMessage({
-        type: 'error',
-        text:
-          err instanceof Error
-            ? err.message
-            : 'Failed to load fees. Run sql/schema/student_fee_schema.sql again (adds is_free).',
-      });
+      toastError(err, 'Failed to load fees.');
     } finally {
       setLoading(false);
     }
@@ -423,11 +431,10 @@ export default function StudentFeesPage() {
     if (!payModal) return;
     const amount = Number(payModal.amount);
     if (Number.isNaN(amount) || amount < 0) {
-      setMessage({ type: 'error', text: 'Enter a valid amount.' });
+      toastError('Enter a valid amount.');
       return;
     }
     setSavingId(payModal.student.studentId);
-    setMessage(null);
     try {
       const payload: Record<string, unknown> = {
         student_id: payModal.student.studentId,
@@ -466,28 +473,150 @@ export default function StudentFeesPage() {
         if (error) throw new Error(error.message);
       }
 
-      setMessage({
-        type: 'success',
-        text: `Fee recorded for ${payModal.student.name} (Rs ${amount.toLocaleString()})`,
-      });
+      toastSuccess('Fee recorded.');
       setPayModal(null);
       await loadData();
     } catch (err: unknown) {
-      setMessage({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to save payment.',
-      });
+      toastError(err, 'Failed to save payment.');
     } finally {
       setSavingId(null);
     }
   };
 
+  const balanceForMonth = useCallback(
+    (student: StudentFeeRow, y: number, m: number) => {
+      if (student.isFree || (student.initialFee <= 0 && student.monthlyFee <= 0)) {
+        return { initialDue: 0, monthlyDue: 0, pending: 0, status: 'Free' as const };
+      }
+      const pays = paymentsByStudent.get(student.studentId) ?? [];
+      const paidInitial = pays
+        .filter((p) => p.payment_type === 'Initial' && p.status === 'Paid')
+        .reduce((s, p) => s + p.amount, 0);
+      const initialDue = Math.max(0, student.initialFee - paidInitial);
+      const paidThisMonth = pays
+        .filter(
+          (p) =>
+            p.payment_type === 'Monthly' &&
+            p.status === 'Paid' &&
+            p.year === y &&
+            p.month === m,
+        )
+        .reduce((s, p) => s + p.amount, 0);
+      const monthlyDue = Math.max(0, student.monthlyFee - paidThisMonth);
+      const adjustmentPaid = pays
+        .filter((p) => p.payment_type === 'Adjustment' && p.status === 'Paid')
+        .reduce((s, p) => s + p.amount, 0);
+      const pending = Math.max(0, initialDue + monthlyDue - adjustmentPaid);
+      return {
+        initialDue,
+        monthlyDue,
+        pending,
+        status: pending > 0 ? ('Pending' as const) : ('Cleared' as const),
+      };
+    },
+    [paymentsByStudent],
+  );
+
+  const handleExportFeeReport = async () => {
+    const { year: ey, month: em } = parseMonthInput(exportMonthValue);
+    setExportingFee(true);
+    try {
+      let exportRows = students.map((s) => ({
+        student: s,
+        balance: balanceForMonth(s, ey, em),
+      }));
+      if (exportScope === 'pending') {
+        exportRows = exportRows.filter((r) => r.balance.pending > 0);
+      }
+
+      if (exportRows.length === 0) {
+        toastError(
+          exportScope === 'pending'
+            ? 'No pending fees for this month.'
+            : 'No students to export.',
+        );
+        return;
+      }
+
+      const { doc, autoTable } = await createReportDoc('landscape');
+      const label = monthLabel(ey, em);
+      const pendingTotal = exportRows.reduce((s, r) => s + r.balance.pending, 0);
+
+      paintReportHeader(doc, {
+        title: 'Student Fee Report',
+        subtitle:
+          exportScope === 'pending' ? 'Pending fees only' : 'All approved students',
+        metaLeft: label,
+        metaRight: new Date().toLocaleString(),
+        theme: 'emerald',
+      });
+
+      paintSummaryBar(
+        doc,
+        34,
+        [
+          `Students ${exportRows.length}`,
+          `Pending total ${moneyPKR(pendingTotal)}`,
+          label,
+        ],
+        'emerald',
+      );
+
+      autoTable(doc, {
+        startY: 52,
+        head: [
+          [
+            '#',
+            'App ID',
+            'Student',
+            'Email',
+            'Course',
+            'Phone',
+            'Initial due',
+            'Monthly due',
+            'Pending',
+            'Status',
+          ],
+        ],
+        body: exportRows.map((r, i) => [
+          String(i + 1),
+          r.student.applicationId || '—',
+          r.student.name,
+          r.student.email || '—',
+          r.student.courseName,
+          r.student.phone || '—',
+          r.student.isFree ? 'Free' : moneyPKR(r.balance.initialDue),
+          r.student.isFree ? 'Free' : moneyPKR(r.balance.monthlyDue),
+          r.student.isFree ? '—' : moneyPKR(r.balance.pending),
+          r.balance.status,
+        ]),
+        ...defaultTableStyles('emerald'),
+        columnStyles: {
+          2: { cellWidth: 36 },
+          3: { cellWidth: 48 },
+          4: { cellWidth: 38 },
+        },
+      });
+
+      paintFooters(doc, 'BanoQabil LMS · Admin · Fee Report');
+
+      const scopeSlug = exportScope === 'pending' ? 'pending' : 'all';
+      doc.save(`banoqabil-fee-report-${toMonthInputValue(ey, em)}-${scopeSlug}.pdf`);
+      toastSuccess('Fee report downloaded.');
+      setShowFeeExport(false);
+    } catch (err: unknown) {
+      toastError(err, 'Export failed.');
+    } finally {
+      setExportingFee(false);
+    }
+  };
+
   if (!canManage) {
     return (
-      <div className="py-10 text-center">
-        <h1 className="text-2xl font-bold">Access denied</h1>
-        <p className="mt-2 text-muted-foreground">Only Admin can manage student fees.</p>
-      </div>
+      <AccessDenied
+        title="Access denied"
+        message="Only Admin can manage student fees."
+      />
     );
   }
 
@@ -496,43 +625,49 @@ export default function StudentFeesPage() {
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 rounded-xl border bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-5">
-        <div className="flex items-start gap-3">
-          <div className="rounded-xl bg-emerald-600 p-2.5 text-white shadow-sm">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="shrink-0 rounded-xl bg-emerald-600 p-2.5 text-white shadow-sm">
             <Receipt className="h-5 w-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Student Fees</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Record payments · selected month dues · history · WhatsApp reminders
+            <p className="mt-0.5 truncate text-sm text-muted-foreground">
+              Payments, month dues, history & WhatsApp reminders
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-xs font-medium text-muted-foreground">Month</label>
-          <Input
-            type="month"
-            className="h-10 w-[11.5rem] bg-background"
-            value={toMonthInputValue(year, month)}
-            onChange={(e) => {
-              const next = parseMonthInput(e.target.value);
-              setYear(next.year);
-              setMonth(next.month);
+        <div className="flex shrink-0 flex-wrap items-end gap-2 sm:flex-nowrap">
+          <div className="space-y-1">
+            <label className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Month
+            </label>
+            <Input
+              type="month"
+              className="h-10 w-[11.5rem] bg-background"
+              value={toMonthInputValue(year, month)}
+              onChange={(e) => {
+                const next = parseMonthInput(e.target.value);
+                setYear(next.year);
+                setMonth(next.month);
+              }}
+            />
+          </div>
+          <Button
+            className="h-10 gap-2"
+            onClick={() => {
+              if (!canExport) {
+                toastError(denyMessage('can_export_pdf'));
+                return;
+              }
+              setExportMonthValue(toMonthInputValue(year, month));
+              setShowFeeExport(true);
             }}
-          />
+          >
+            <FileDown className="h-4 w-4" />
+            Export Report
+          </Button>
         </div>
       </div>
-
-      {message ? (
-        <div
-          className={`rounded-lg border px-4 py-3 text-sm ${
-            message.type === 'success'
-              ? 'border-green-200 bg-green-50 text-green-800'
-              : 'border-destructive/30 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {message.text}
-        </div>
-      ) : null}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-xl border bg-white p-4 shadow-sm">
@@ -971,6 +1106,69 @@ export default function StudentFeesPage() {
               <div className="flex justify-end">
                 <Button variant="outline" onClick={() => setHistoryStudent(null)}>
                   Close
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {showFeeExport ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-md border-none shadow-lg">
+            <CardContent className="space-y-4 p-6">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold">Export Fee Report</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Download PDF after selecting scope and month.
+                  </p>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setShowFeeExport(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Students</label>
+                <select
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={exportScope}
+                  onChange={(e) => setExportScope(e.target.value as 'pending' | 'all')}
+                >
+                  <option value="pending">Pending fees only</option>
+                  <option value="all">All students</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Month</label>
+                <Input
+                  type="month"
+                  value={exportMonthValue}
+                  onChange={(e) => setExportMonthValue(e.target.value)}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2 pt-1">
+                <Button
+                  className="gap-2"
+                  disabled={exportingFee}
+                  onClick={() => void handleExportFeeReport()}
+                >
+                  {exportingFee ? (
+                    <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-white" />
+                  ) : (
+                    <FileDown className="h-4 w-4" />
+                  )}
+                  {exportingFee ? 'Generating…' : 'Generate & Download'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => setShowFeeExport(false)}
+                  disabled={exportingFee}
+                >
+                  Cancel
                 </Button>
               </div>
             </CardContent>

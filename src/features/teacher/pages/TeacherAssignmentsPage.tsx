@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
+import { toastError } from '@/lib/notify';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -33,7 +34,6 @@ export default function TeacherAssignmentsPage() {
   const [batches, setBatches] = useState<(BatchRow & { display_name: string })[]>([]);
   const [teacherId, setTeacherId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -49,8 +49,6 @@ export default function TeacherAssignmentsPage() {
   const loadData = async () => {
     if (!user?.id) return;
     setLoading(true);
-    setErrorMessage('');
-
     const assigned = await getTeacherAssignedCourse(user.id);
     setCourseName(assigned?.name ?? null);
     setGenderScope(assigned?.genderScope ?? null);
@@ -88,7 +86,7 @@ export default function TeacherAssignmentsPage() {
     }
 
     if (error) {
-      setErrorMessage(error.message);
+      toastError(error, 'Something went wrong.');
       setAssignments([]);
     } else {
       setAssignments((data ?? []) as AssignmentRow[]);
@@ -103,13 +101,11 @@ export default function TeacherAssignmentsPage() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.id || !form.title.trim() || !form.batch_id || !form.due_date) {
-      setErrorMessage('Title, batch and due date are required.');
+      toastError('Fill in required fields.');
       return;
     }
 
     setSaving(true);
-    setErrorMessage('');
-
     const { error } = await supabase.from('assignments').insert({
       title: form.title.trim(),
       description: form.description.trim() || null,
@@ -121,7 +117,7 @@ export default function TeacherAssignmentsPage() {
     });
 
     if (error) {
-      setErrorMessage(error.message);
+      toastError(error, 'Something went wrong.');
       setSaving(false);
       return;
     }
@@ -139,7 +135,7 @@ export default function TeacherAssignmentsPage() {
       .update({ status: next })
       .eq('id', assignment.id);
     if (error) {
-      setErrorMessage(error.message);
+      toastError(error, 'Something went wrong.');
       return;
     }
     setAssignments((prev) =>
@@ -162,12 +158,6 @@ export default function TeacherAssignmentsPage() {
           {showForm ? 'Cancel' : 'Create Assignment'}
         </Button>
       </div>
-
-      {errorMessage && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {errorMessage}
-        </div>
-      )}
 
       {showForm && (
         <Card>

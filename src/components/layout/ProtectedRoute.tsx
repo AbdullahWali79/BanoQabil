@@ -1,14 +1,26 @@
 import { Navigate, useLocation } from 'react-router';
 import { useAuthStore } from '@/store/authStore';
 import { effectiveAppRole } from '@/lib/roles';
+import { can, permissionForPath, type PermissionKey } from '@/lib/permissions';
+import type { UnauthorizedReason } from '@/features/auth/pages/UnauthorizedPage';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: string[];
+  /** Admin must have this permission (Super Admin always allowed). */
+  requiredPermission?: PermissionKey | PermissionKey[];
 }
 
-export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, role, isLoading } = useAuthStore();
+function toUnauthorized(reason: UnauthorizedReason) {
+  return <Navigate to="/unauthorized" replace state={{ reason }} />;
+}
+
+export function ProtectedRoute({
+  children,
+  allowedRoles,
+  requiredPermission,
+}: ProtectedRouteProps) {
+  const { user, role, permissions, isLoading } = useAuthStore();
   const appRole = effectiveAppRole(user?.email, role);
   const location = useLocation();
 
@@ -26,17 +38,18 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
 
   const { status } = useAuthStore.getState();
 
-  // Account gating by status
   if (status === 'Pending' && location.pathname !== '/pending') {
     return <Navigate to="/pending" replace />;
   }
 
-  // Suspended / Rejected accounts should never access dashboards
-  if ((status === 'Suspended' || status === 'Rejected') && location.pathname !== '/unauthorized') {
-    return <Navigate to="/unauthorized" replace />;
+  if (status === 'Suspended' && location.pathname !== '/unauthorized') {
+    return toUnauthorized('suspended');
   }
 
-  // If approved accounts try to access /pending, redirect to dashboard
+  if (status === 'Rejected' && location.pathname !== '/unauthorized') {
+    return toUnauthorized('rejected');
+  }
+
   if (status !== 'Pending' && location.pathname === '/pending') {
     return <Navigate to="/dashboard" replace />;
   }
@@ -50,7 +63,18 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   }
 
   if (allowedRoles && appRole && !allowedRoles.includes(appRole)) {
-    return <Navigate to="/unauthorized" replace />;
+    return toUnauthorized('role');
+  }
+
+  const pathPerm = permissionForPath(location.pathname);
+  const need = requiredPermission ?? (appRole === 'Admin' ? pathPerm ?? undefined : undefined);
+
+  if (
+    need &&
+    appRole === 'Admin' &&
+    !can({ email: user.email, role, permissions }, need)
+  ) {
+    return toUnauthorized('permission');
   }
 
   return <>{children}</>;

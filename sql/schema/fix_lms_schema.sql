@@ -235,7 +235,7 @@ with check (
         or status is not distinct from (
           select p_old.status
           from public.profiles p_old
-          where p_old.id = id
+          where p_old.id = profiles.id
         )
         or status = 'Pending'
       )

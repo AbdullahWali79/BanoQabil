@@ -55,12 +55,15 @@ async function callAdminSetPassword(body: AdminSetBody) {
   if (!res.ok) {
     if (res.status === 404) {
       throw new Error(
-        'Edge Function "admin-set-password" not found. Deploy it in Supabase → Edge Functions.',
+        'Password service is not available. Ask Super Admin to deploy admin-set-password.',
       );
     }
-    throw new Error(
-      payload?.error || `Password API failed (${res.status}). ${text.slice(0, 180)}`,
-    );
+    // Do not leak raw response bodies to the UI
+    const safe =
+      typeof payload?.error === 'string' && payload.error.length < 180 && !/jwt|apikey|stack/i.test(payload.error)
+        ? payload.error
+        : `Password update failed (${res.status}). Please try again.`;
+    throw new Error(safe);
   }
 
   if (payload?.error) {

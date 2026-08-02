@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { toastError } from '@/lib/notify';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Search, FileText } from 'lucide-react';
@@ -25,12 +26,10 @@ export default function AllSubmissionsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      setErrorMessage('');
       const { data, error } = await supabase
         .from('submissions')
         .select(
@@ -48,7 +47,7 @@ export default function AllSubmissionsPage() {
         .order('submitted_at', { ascending: false });
 
       if (error) {
-        setErrorMessage(error.message);
+        toastError(error, 'Something went wrong.');
         setRows([]);
       } else {
         setRows((data ?? []) as SubmissionRow[]);
@@ -110,10 +109,6 @@ export default function AllSubmissionsPage() {
               <option>Late</option>
             </select>
           </div>
-
-          {errorMessage && (
-            <div className="px-4 py-3 text-sm text-destructive border-b">{errorMessage}</div>
-          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">

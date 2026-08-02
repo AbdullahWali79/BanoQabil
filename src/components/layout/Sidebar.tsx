@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router';
 import { useAuthStore } from '@/store/authStore';
 import { effectiveAppRole } from '@/lib/roles';
+import { can, type PermissionKey } from '@/lib/permissions';
 import {
   LayoutDashboard,
   Shield,
@@ -25,6 +26,7 @@ type NavItem = {
   to: string;
   icon: React.ReactNode;
   label: string;
+  permission?: PermissionKey;
 };
 
 type NavGroup = {
@@ -37,7 +39,10 @@ type SidebarProps = {
   onClose?: () => void;
 };
 
-function buildGroups(appRole: string | null): NavGroup[] {
+function buildGroups(
+  appRole: string | null,
+  ctx: { email?: string | null; role?: string | null; permissions?: import('@/types').AdminPermissions | null },
+): NavGroup[] {
   const groups: NavGroup[] = [
     {
       title: 'Overview',
@@ -53,30 +58,63 @@ function buildGroups(appRole: string | null): NavGroup[] {
         { to: '/dashboard/teachers', icon: <Users size={18} />, label: 'Teachers' },
         { to: '/dashboard/admins', icon: <Shield size={18} />, label: 'Admins' },
         { to: '/dashboard/staff-pay', icon: <Banknote size={18} />, label: 'Staff Pay' },
+        { to: '/dashboard/staff-reports', icon: <FileText size={18} />, label: 'Reports' },
         { to: '/dashboard/roles', icon: <KeyRound size={18} />, label: 'Roles' },
       ],
     });
   }
 
   if (appRole === 'Admin') {
-    groups.push(
+    const peopleAll: NavItem[] = [
       {
-        title: 'People',
-        items: [
-          { to: '/dashboard/approvals', icon: <UserCheck size={18} />, label: 'Approvals' },
-          { to: '/dashboard/teachers', icon: <Users size={18} />, label: 'Teachers' },
-          { to: '/dashboard/students', icon: <GraduationCap size={18} />, label: 'Students' },
-        ],
+        to: '/dashboard/approvals',
+        icon: <UserCheck size={18} />,
+        label: 'Approvals',
+        permission: 'can_approve_users',
       },
       {
-        title: 'Academics',
-        items: [
-          { to: '/dashboard/courses', icon: <BookOpen size={18} />, label: 'Courses & Batches' },
-          { to: '/dashboard/fees', icon: <Receipt size={18} />, label: 'Student Fees' },
-          { to: '/dashboard/reports', icon: <FileText size={18} />, label: 'Reports' },
-        ],
+        to: '/dashboard/teachers',
+        icon: <Users size={18} />,
+        label: 'Teachers',
+        permission: 'can_manage_teachers',
       },
+      {
+        to: '/dashboard/students',
+        icon: <GraduationCap size={18} />,
+        label: 'Students',
+        permission: 'can_manage_students',
+      },
+    ];
+    const people = peopleAll.filter(
+      (item) => !item.permission || can(ctx, item.permission),
     );
+
+    const academicsAll: NavItem[] = [
+      {
+        to: '/dashboard/courses',
+        icon: <BookOpen size={18} />,
+        label: 'Courses & Batches',
+        permission: 'can_manage_courses',
+      },
+      {
+        to: '/dashboard/fees',
+        icon: <Receipt size={18} />,
+        label: 'Student Fees',
+        permission: 'can_manage_students',
+      },
+      {
+        to: '/dashboard/reports',
+        icon: <FileText size={18} />,
+        label: 'Reports',
+        permission: 'can_view_reports',
+      },
+    ];
+    const academics = academicsAll.filter(
+      (item) => !item.permission || can(ctx, item.permission),
+    );
+
+    if (people.length) groups.push({ title: 'People', items: people });
+    if (academics.length) groups.push({ title: 'Academics', items: academics });
   }
 
   if (appRole === 'Teacher') {
@@ -231,9 +269,13 @@ function SidebarPanel({
 }
 
 export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
-  const { role, user } = useAuthStore();
+  const { role, user, permissions } = useAuthStore();
   const appRole = effectiveAppRole(user?.email, role);
-  const groups = buildGroups(appRole);
+  const groups = buildGroups(appRole, {
+    email: user?.email,
+    role,
+    permissions,
+  });
   const rawName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User';
   const displayName =
     String(rawName)

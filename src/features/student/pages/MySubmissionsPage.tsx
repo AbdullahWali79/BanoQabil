@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
+import { toastError } from '@/lib/notify';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Search, Upload } from 'lucide-react';
@@ -26,18 +27,15 @@ export default function MySubmissionsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
-  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     async function fetchSubmissions() {
       if (!user?.id) return;
       setLoading(true);
-      setErrorMessage('');
-
       const ctx = await getStudentContext(user.id);
 
       if (!ctx?.studentId) {
-        setErrorMessage('Student profile not found. Please contact admin to complete your setup.');
+        toastError('Profile not found. Contact admin.');
         setLoading(false);
         return;
       }
@@ -51,7 +49,7 @@ export default function MySubmissionsPage() {
         .order('submitted_at', { ascending: false });
 
       if (error) {
-        setErrorMessage(`Unable to load submissions: ${error.message}`);
+        toastError(error, 'Unable to load submissions.');
       } else {
         setSubmissions((data ?? []) as SubmissionRecord[]);
       }
@@ -112,12 +110,6 @@ export default function MySubmissionsPage() {
                   <tr>
                     <td colSpan={7} className="px-6 py-10 text-center text-muted-foreground">
                       Loading submissions...
-                    </td>
-                  </tr>
-                ) : errorMessage ? (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-10 text-center text-destructive">
-                      {errorMessage}
                     </td>
                   </tr>
                 ) : filtered.length === 0 ? (

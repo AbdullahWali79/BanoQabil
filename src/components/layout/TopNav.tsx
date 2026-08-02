@@ -30,6 +30,7 @@ function pageTitleFromPath(pathname: string) {
     '/dashboard/reports': 'Reports',
     '/dashboard/admins': 'Admins',
     '/dashboard/staff-pay': 'Staff Pay',
+    '/dashboard/staff-reports': 'Staff Reports',
     '/dashboard/roles': 'Roles',
     '/dashboard/settings': 'Settings',
     '/dashboard/my-class': 'My Classes',

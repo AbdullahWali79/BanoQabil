@@ -128,19 +128,45 @@ export async function getTeacherBatches(
   }));
 }
 
-/** Ensure a teachers row exists for an approved teacher profile. */
-export async function ensureTeacherRow(profileId: string, specialization = 'General') {
+/** Ensure a teachers row exists; optional fields are applied on insert or update. */
+export async function ensureTeacherRow(
+  profileId: string,
+  specialization = 'General',
+  extras?: Record<string, string | null | undefined>,
+) {
   const { data: existing } = await supabase
     .from('teachers')
     .select('id')
     .eq('profile_id', profileId)
     .limit(1);
 
-  if (existing?.[0]?.id) return existing[0].id;
+  const cleanExtras: Record<string, string | null> = {};
+  if (extras) {
+    for (const [key, value] of Object.entries(extras)) {
+      if (key === 'profile_id' || key === 'id') continue;
+      if (value === undefined) continue;
+      cleanExtras[key] = value;
+    }
+  }
+
+  if (existing?.[0]?.id) {
+    if (Object.keys(cleanExtras).length > 0) {
+      const { error } = await supabase
+        .from('teachers')
+        .update({ specialization, ...cleanExtras })
+        .eq('id', existing[0].id);
+      if (error) throw error;
+    }
+    return existing[0].id;
+  }
 
   const { data, error } = await supabase
     .from('teachers')
-    .insert({ profile_id: profileId, specialization })
+    .insert({
+      profile_id: profileId,
+      specialization,
+      ...cleanExtras,
+    })
     .select('id')
     .limit(1);
 

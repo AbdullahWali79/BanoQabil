@@ -7,6 +7,7 @@ import { ProtectedRoute } from '@/components/layout/ProtectedRoute';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { LandingPage } from '@/pages/LandingPage';
 import { PendingApprovalsPage } from '@/features/admin/pages/PendingApprovalsPage';
+import UnauthorizedPage from '@/features/auth/pages/UnauthorizedPage';
 import { useAuthStore } from '@/store/authStore';
 import { effectiveAppRole } from '@/lib/roles';
 
@@ -22,6 +23,7 @@ const SuperAdminDashboard = lazy(() => import('@/features/superadmin/pages/Super
 const RolesPage = lazy(() => import('@/features/superadmin/pages/RolesPage'));
 const ManageAdminsPage = lazy(() => import('@/features/superadmin/pages/ManageAdminsPage'));
 const StaffPayPage = lazy(() => import('@/features/superadmin/pages/StaffPayPage'));
+const SuperAdminReportsPage = lazy(() => import('@/features/superadmin/pages/SuperAdminReportsPage'));
 
 const TeacherDashboard = lazy(() => import('@/features/teacher/pages/TeacherDashboard'));
 const MyClassPage = lazy(() => import('@/features/teacher/pages/MyClassPage'));
@@ -78,13 +80,6 @@ function RoleDashboard() {
   );
 }
 
-const Unauthorized = () => (
-  <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
-    <h1 className="text-4xl font-bold text-destructive">403</h1>
-    <p className="text-muted-foreground">You are not authorized to view this page.</p>
-  </div>
-);
-
 // Helper to wrap lazy pages with Suspense
 function Lazy({ children }: { children: import('react').ReactNode }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
@@ -108,14 +103,15 @@ const router = createBrowserRouter([
       { path: 'roles', element: <ProtectedRoute allowedRoles={['Super Admin']}><Lazy><RolesPage /></Lazy></ProtectedRoute> },
       { path: 'admins', element: <ProtectedRoute allowedRoles={['Super Admin']}><Lazy><ManageAdminsPage /></Lazy></ProtectedRoute> },
       { path: 'staff-pay', element: <ProtectedRoute allowedRoles={['Super Admin']}><Lazy><StaffPayPage /></Lazy></ProtectedRoute> },
+      { path: 'staff-reports', element: <ProtectedRoute allowedRoles={['Super Admin']}><Lazy><SuperAdminReportsPage /></Lazy></ProtectedRoute> },
 
       // Admin + Super Admin (students approve by Admin; teachers approve/reject by Super Admin)
-      { path: 'approvals', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><PendingApprovalsPage /></ProtectedRoute> },
-      { path: 'teachers', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><Lazy><ManageTeachersPage /></Lazy></ProtectedRoute> },
-      { path: 'students', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><Lazy><ManageStudentsPage /></Lazy></ProtectedRoute> },
-      { path: 'courses', element: <ProtectedRoute allowedRoles={['Admin']}><Lazy><CoursesPage /></Lazy></ProtectedRoute> },
-      { path: 'fees', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']}><Lazy><StudentFeesPage /></Lazy></ProtectedRoute> },
-      { path: 'reports', element: <ProtectedRoute allowedRoles={['Admin']}><Lazy><ReportsPage /></Lazy></ProtectedRoute> },
+      { path: 'approvals', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']} requiredPermission="can_approve_users"><PendingApprovalsPage /></ProtectedRoute> },
+      { path: 'teachers', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']} requiredPermission="can_manage_teachers"><Lazy><ManageTeachersPage /></Lazy></ProtectedRoute> },
+      { path: 'students', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']} requiredPermission="can_manage_students"><Lazy><ManageStudentsPage /></Lazy></ProtectedRoute> },
+      { path: 'courses', element: <ProtectedRoute allowedRoles={['Admin']} requiredPermission="can_manage_courses"><Lazy><CoursesPage /></Lazy></ProtectedRoute> },
+      { path: 'fees', element: <ProtectedRoute allowedRoles={['Admin', 'Super Admin']} requiredPermission="can_manage_students"><Lazy><StudentFeesPage /></Lazy></ProtectedRoute> },
+      { path: 'reports', element: <ProtectedRoute allowedRoles={['Admin']} requiredPermission="can_view_reports"><Lazy><ReportsPage /></Lazy></ProtectedRoute> },
 
       // Teacher
       // Assignments create/grade are teacher-only (not admin)
@@ -140,7 +136,7 @@ const router = createBrowserRouter([
       { path: 'settings', element: <Lazy><SettingsPage /></Lazy> },
     ],
   },
-  { path: '/unauthorized', element: <Unauthorized /> },
+  { path: '/unauthorized', element: <UnauthorizedPage /> },
   { path: '*', element: <Navigate to="/" replace /> },
 ]);
 

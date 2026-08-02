@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/form';
 import { ensureStudentRow } from '@/features/teacher/utils/teacherData';
 import { generateUniqueApplicationId } from '@/lib/applicationId';
+import { toastError } from '@/lib/notify';
 
 const signupSchema = z.object({
   fullName: z.string().min(3, { message: 'Name must be at least 3 characters' }),
@@ -30,7 +31,6 @@ type CourseOption = { id: string; name: string };
 
 export function SignupForm() {
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [applicationId, setApplicationId] = useState<string | null>(null);
   const [studentRoleId, setStudentRoleId] = useState<string | null>(null);
@@ -59,10 +59,9 @@ export function SignupForm() {
 
   async function onSubmit(data: SignupFormValues) {
     setIsLoading(true);
-    setError(null);
 
     if (!studentRoleId) {
-      setError('Student role is not configured. Please contact admin.');
+      toastError('Signup unavailable. Contact admin.');
       setIsLoading(false);
       return;
     }
@@ -85,9 +84,9 @@ export function SignupForm() {
         rawMessage.toLowerCase().includes('over_email_send_rate_limit') ||
         rawMessage.toLowerCase().includes('email rate limit exceeded')
       ) {
-        setError('Too many signup attempts. Please wait a few minutes and try again.');
+        toastError('Too many attempts. Try later.');
       } else {
-        setError(rawMessage);
+        toastError(signUpError, 'Signup failed. Try again.');
       }
       setIsLoading(false);
       return;
@@ -231,10 +230,6 @@ export function SignupForm() {
               </FormItem>
             )}
           />
-
-          {error && (
-            <p className="text-sm text-destructive text-center font-medium">{error}</p>
-          )}
 
           <Button type="submit" className="w-full" disabled={isLoading || courses.length === 0}>
             {isLoading ? 'Submitting...' : 'Apply as Student'}

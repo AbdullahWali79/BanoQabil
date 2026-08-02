@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { Sidebar } from './Sidebar';
 import { TopNav } from './TopNav';
+import { AccessChangeGuard } from './AccessChangeGuard';
 
 export function AppLayout() {
   const location = useLocation();
@@ -13,6 +14,7 @@ export function AppLayout() {
 
   return (
     <div className="flex h-screen max-h-screen overflow-hidden bg-background text-foreground">
+      <AccessChangeGuard />
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-slate-50">

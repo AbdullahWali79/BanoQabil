@@ -27,6 +27,7 @@ Do **not** delete these files — they are the source of truth for schema and on
    - `patches/assignment_submission_rls.sql`
    - `patches/application_id_unique.sql`
    - `patches/teacher_approval_super_admin_only.sql`
+   - `patches/fix_rls_subquery_id.sql` (fixes teacher add: subquery id bug)
 3. Feature schemas:
    - `schema/staff_pay_schema.sql`
    - `schema/student_fee_schema.sql` (includes `is_free` on courses)

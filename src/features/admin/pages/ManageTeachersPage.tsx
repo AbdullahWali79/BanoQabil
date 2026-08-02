@@ -9,10 +9,13 @@ import {
   Trash2,
   Users,
   RefreshCw,
-  UserCheck,
   X,
   KeyRound,
-  GraduationCap,
+  Sparkles,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  Eye,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { ensureTeacherRow, relationOne, setTeacherCourseAssignment, type GenderScope } from '@/features/teacher/utils/teacherData';
@@ -22,6 +25,28 @@ import {
 } from '@/lib/adminPassword';
 import { useAuthStore } from '@/store/authStore';
 import { effectiveAppRole } from '@/lib/roles';
+import { toastSuccess, toastError } from '@/lib/notify';
+import { askConfirm } from '@/lib/confirmDialog';
+import { usePermission } from '@/hooks/usePermission';
+import { CNIC_LENGTH, sanitizeCnicInput, validateCnic, normalizeCnic } from '@/lib/cnic';
+import {
+  TRAINER_CODE_LENGTH,
+  generateUniqueTrainerCode,
+  isTrainerCodeTaken,
+  isUsernameTaken,
+  isValidTrainerCode,
+  validateTrainerCodeFormat,
+} from '@/lib/trainerCode';
+import {
+  getCities,
+  getDistricts,
+  getProvinces,
+  getRegions,
+  withCurrentOption,
+} from '@/lib/pakistanLocations';
+
+const selectClassName =
+  'h-10 w-full rounded-md border bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50';
 
 type TeacherRow = {
   id: string;
@@ -123,6 +148,9 @@ export default function ManageTeachersPage() {
   /** Super Admin only: edit teacher username/email and delete teachers */
   const canEditTeacherCredentials = appRole === 'Super Admin';
   const canDeleteTeacher = appRole === 'Super Admin';
+  const { can: canPerm, denyMessage } = usePermission();
+  const canAssignCourses = canPerm('can_assign_teachers');
+  const canResetPasswords = canPerm('can_reset_passwords');
 
   const [teachers, setTeachers] = useState<TeacherRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,16 +161,25 @@ export default function ManageTeachersPage() {
   const [genderFilter, setGenderFilter] = useState<'All' | GenderScope | 'None'>('All');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editing, setEditing] = useState<TeacherRow | null>(null);
+  const [viewing, setViewing] = useState<TeacherRow | null>(null);
   const [form, setForm] = useState<TeacherForm>(emptyForm);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [teacherRoleId, setTeacherRoleId] = useState<string | null>(null);
-  const [useUsernameAsPassword, setUseUsernameAsPassword] = useState(false);
+  const [useTrainerCodeAsPassword, setUseTrainerCodeAsPassword] = useState(true);
   const [resetTarget, setResetTarget] = useState<TeacherRow | null>(null);
   const [resetPassword, setResetPassword] = useState('');
   const [resetConfirm, setResetConfirm] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [generatingTrainerCode, setGeneratingTrainerCode] = useState(false);
+  const [trainerCodeCheck, setTrainerCodeCheck] = useState<{
+    status: 'idle' | 'checking' | 'valid' | 'invalid';
+    message: string;
+  }>({ status: 'idle', message: '' });
+  const [usernameCheck, setUsernameCheck] = useState<{
+    status: 'idle' | 'checking' | 'valid' | 'invalid';
+    message: string;
+  }>({ status: 'idle', message: '' });
   const [courses, setCourses] = useState<CourseOption[]>([]);
   const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([]);
   const [genderScope, setGenderScope] = useState<GenderScope | ''>('');
@@ -151,6 +188,25 @@ export default function ManageTeachersPage() {
 
   const setField = (key: keyof TeacherForm, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  /** Province → Region → District → City; clearing a parent resets children. */
+  const setLocationField = (
+    level: 'province' | 'region' | 'district' | 'city',
+    value: string,
+  ) => {
+    setForm((prev) => {
+      if (level === 'province') {
+        return { ...prev, province: value, region: '', district: '', city: '' };
+      }
+      if (level === 'region') {
+        return { ...prev, region: value, district: '', city: '' };
+      }
+      if (level === 'district') {
+        return { ...prev, district: value, city: '' };
+      }
+      return { ...prev, city: value };
+    });
   };
 
   const fetchTeacherCourses = async (teacherList: TeacherRow[]) => {
@@ -197,7 +253,7 @@ export default function ManageTeachersPage() {
 
     if (error) {
       setTeachers([]);
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Failed to load teachers.');
     } else {
       const list = ((data ?? []) as Array<Record<string, unknown>>).map((row) => {
         const profiles = relationOne(
@@ -235,12 +291,111 @@ export default function ManageTeachersPage() {
     fetchTeachers();
   }, []);
 
+  const handleAutoGenerateTrainerCode = async () => {
+    setGeneratingTrainerCode(true);
+    try {
+      const code = await generateUniqueTrainerCode();
+      setForm((prev) => ({
+        ...prev,
+        trainer_code: code,
+        ...(useTrainerCodeAsPassword
+          ? { password: code, confirmPassword: code }
+          : {}),
+      }));
+    } catch (err: unknown) {
+      toastError(err, 'Could not generate ID.');
+    } finally {
+      setGeneratingTrainerCode(false);
+    }
+  };
+
+  // Live Trainer Code format + uniqueness
+  useEffect(() => {
+    if (!editing && !showAddModal) {
+      setTrainerCodeCheck({ status: 'idle', message: '' });
+      return;
+    }
+    const raw = form.trainer_code.trim();
+    if (!raw) {
+      setTrainerCodeCheck({ status: 'idle', message: '' });
+      return;
+    }
+    const formatErr = validateTrainerCodeFormat(raw);
+    if (formatErr) {
+      setTrainerCodeCheck({ status: 'invalid', message: formatErr });
+      return;
+    }
+    let cancelled = false;
+    setTrainerCodeCheck({ status: 'checking', message: 'Checking…' });
+    const timer = window.setTimeout(async () => {
+      try {
+        const taken = await isTrainerCodeTaken(raw, editing?.id ?? null);
+        if (cancelled) return;
+        setTrainerCodeCheck(
+          taken
+            ? { status: 'invalid', message: 'Trainer Code already in use.' }
+            : { status: 'valid', message: 'Trainer Code is available.' },
+        );
+      } catch {
+        if (!cancelled) {
+          setTrainerCodeCheck({ status: 'idle', message: '' });
+        }
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [form.trainer_code, editing, showAddModal]);
+
+  // Live username uniqueness
+  useEffect(() => {
+    if (!editing && !showAddModal) {
+      setUsernameCheck({ status: 'idle', message: '' });
+      return;
+    }
+    const raw = form.username.trim();
+    if (!raw) {
+      setUsernameCheck({ status: 'idle', message: '' });
+      return;
+    }
+    if (raw.length < 3) {
+      setUsernameCheck({ status: 'invalid', message: 'User Name must be at least 3 characters.' });
+      return;
+    }
+    if (editing && !canEditTeacherCredentials) {
+      setUsernameCheck({ status: 'idle', message: '' });
+      return;
+    }
+    let cancelled = false;
+    setUsernameCheck({ status: 'checking', message: 'Checking…' });
+    const timer = window.setTimeout(async () => {
+      try {
+        const taken = await isUsernameTaken(raw, editing?.id ?? null);
+        if (cancelled) return;
+        setUsernameCheck(
+          taken
+            ? { status: 'invalid', message: 'Username already taken.' }
+            : { status: 'valid', message: 'Username is available.' },
+        );
+      } catch {
+        if (!cancelled) setUsernameCheck({ status: 'idle', message: '' });
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [form.username, editing, showAddModal, canEditTeacherCredentials]);
+
   const coursePicker = (
-    <div className="space-y-4">
+    <div className={`space-y-4 ${!canAssignCourses ? 'pointer-events-none opacity-60' : ''}`}>
       <div className="space-y-2">
         <FieldLabel>Assigned Course</FieldLabel>
         <p className="text-xs text-muted-foreground">
-          Pick one course, or No Course. Same course cannot be given twice for the same gender group.
+          {canAssignCourses
+            ? 'Pick one course, or No Course. Same course cannot be given twice for the same gender group.'
+            : denyMessage('can_assign_teachers')}
         </p>
         <div className="grid gap-2 sm:grid-cols-2 rounded-md border p-3 max-h-48 overflow-y-auto">
           <label className="flex items-center gap-2 text-sm cursor-pointer sm:col-span-2">
@@ -337,6 +492,7 @@ export default function ManageTeachersPage() {
         t.profiles?.full_name?.toLowerCase().includes(q) ||
         t.profiles?.email?.toLowerCase().includes(q) ||
         t.username?.toLowerCase().includes(q) ||
+        t.trainer_code?.toLowerCase().includes(q) ||
         t.cnic?.toLowerCase().includes(q) ||
         t.city?.toLowerCase().includes(q) ||
         t.specialization?.toLowerCase().includes(q)
@@ -349,7 +505,17 @@ export default function ManageTeachersPage() {
     let femaleOnly = 0;
     let both = 0;
     let noCourse = 0;
+    let approved = 0;
+    let pending = 0;
+    let suspended = 0;
+    let rejected = 0;
     for (const t of teachers) {
+      const status = t.profiles?.status || '';
+      if (status === 'Approved') approved += 1;
+      else if (status === 'Pending') pending += 1;
+      else if (status === 'Suspended') suspended += 1;
+      else if (status === 'Rejected') rejected += 1;
+
       const has = (teacherCourseMap[t.id] ?? []).length > 0;
       if (!has) {
         noCourse += 1;
@@ -360,46 +526,69 @@ export default function ManageTeachersPage() {
       else if (s === 'Female') femaleOnly += 1;
       else both += 1;
     }
-    return { total: teachers.length, maleOnly, femaleOnly, both, noCourse };
+    return {
+      total: teachers.length,
+      maleOnly,
+      femaleOnly,
+      both,
+      noCourse,
+      approved,
+      pending,
+      suspended,
+      rejected,
+    };
   }, [teachers, teacherCourseMap, teacherScopeMap]);
 
   const scopeBadge = (scope?: GenderScope | '', hasCourse?: boolean) => {
     if (!hasCourse) {
       return (
-        <span className="inline-flex items-center rounded-md border border-dashed px-2.5 py-1 text-xs font-medium text-muted-foreground">
+        <span className="inline-flex items-center rounded border border-dashed px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
           No Course
         </span>
       );
     }
     if (!scope) {
       return (
-        <span className="inline-flex items-center rounded-md bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900">
-          Not set — 0 students
+        <span className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+          Not set
         </span>
       );
     }
     if (scope === 'Male') {
       return (
-        <span className="inline-flex items-center rounded-md bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-800">
+        <span className="inline-flex items-center rounded bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800">
           Only Male
         </span>
       );
     }
     if (scope === 'Female') {
       return (
-        <span className="inline-flex items-center rounded-md bg-pink-100 px-2.5 py-1 text-xs font-semibold text-pink-800">
+        <span className="inline-flex items-center rounded bg-pink-100 px-2 py-0.5 text-[11px] font-semibold text-pink-800">
           Only Female
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center rounded-md bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-800">
-        Both (M + F)
+      <span className="inline-flex items-center rounded bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-800">
+        Both
       </span>
     );
   };
 
+  const statusBadgeClass = (status: string | null) => {
+    if (status === 'Approved') {
+      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+    }
+    if (status === 'Suspended' || status === 'Rejected') {
+      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
+    }
+    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+  };
+
   const applyCourseAssignment = async (teacherId: string) => {
+    if (!canAssignCourses) {
+      throw new Error(denyMessage('can_assign_teachers'));
+    }
     const courseId = selectedCourseIds[0] || null;
     const scope = courseId && genderScope ? (genderScope as GenderScope) : null;
     try {
@@ -407,11 +596,14 @@ export default function ManageTeachersPage() {
     } catch (err: any) {
       const msg = String(err?.message || '');
       if (msg.includes('CONFLICT:') || /already|overlapping/i.test(msg)) {
-        const ok = confirm(
-          'Another teacher already covers this class gender for the same course.\n\n' +
-            'OK = auto-adjust them (e.g. Both → opposite gender, or remove duplicate).\n' +
-            'Cancel = keep current assignments and abort.',
-        );
+        const ok = await askConfirm({
+          title: 'Course assignment conflict',
+          description:
+            'Another teacher already covers this class gender for the same course.\n\nContinue to auto-adjust them (e.g. Both → opposite gender, or remove duplicate)?',
+          confirmLabel: 'Yes, auto-adjust',
+          cancelLabel: 'Cancel',
+          tone: 'warning',
+        });
         if (!ok) throw err;
         await setTeacherCourseAssignment(teacherId, courseId, scope, { resolveConflicts: true });
         return;
@@ -421,7 +613,7 @@ export default function ManageTeachersPage() {
   };
 
   const resolveCreatePassword = (data: TeacherForm) => {
-    if (useUsernameAsPassword) return data.username.trim();
+    if (useTrainerCodeAsPassword) return data.trainer_code.trim();
     return data.password.trim();
   };
 
@@ -430,7 +622,6 @@ export default function ManageTeachersPage() {
       ['full_name', 'Trainer Name'],
       ['username', 'User Name'],
       ['email', 'Trainer Email'],
-      ['cnic', 'CNIC / Form-B'],
       ['province', 'Province'],
       ['region', 'Region'],
       ['district', 'District'],
@@ -442,6 +633,10 @@ export default function ManageTeachersPage() {
         return `${label} is required.`;
       }
     }
+    const codeErr = validateTrainerCodeFormat(data.trainer_code);
+    if (codeErr) return codeErr;
+    const cnicError = validateCnic(data.cnic);
+    if (cnicError) return cnicError;
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) {
       return 'Please enter a valid email address.';
     }
@@ -454,7 +649,7 @@ export default function ManageTeachersPage() {
       if (password.length < 6) {
         return 'Password must be at least 6 characters.';
       }
-      if (!useUsernameAsPassword && password !== data.confirmPassword.trim()) {
+      if (!useTrainerCodeAsPassword && password !== data.confirmPassword.trim()) {
         return 'Password and Confirm Password do not match.';
       }
     }
@@ -463,14 +658,14 @@ export default function ManageTeachersPage() {
 
   const teacherPayload = (data: TeacherForm, includeUsername: boolean) => {
     const payload: Record<string, string | null> = {
-      cnic: data.cnic.trim(),
+      cnic: normalizeCnic(data.cnic),
       province: data.province.trim(),
       region: data.region.trim(),
       district: data.district.trim(),
       city: data.city.trim(),
       experience: data.experience.trim() || null,
       address: data.address.trim() || null,
-      trainer_code: data.trainer_code.trim() || null,
+      trainer_code: data.trainer_code.trim(),
       specialization: data.specialization.trim() || null,
     };
     if (includeUsername) {
@@ -481,10 +676,12 @@ export default function ManageTeachersPage() {
 
   const openAdd = () => {
     setForm(emptyForm);
-    setUseUsernameAsPassword(false);
+    setUseTrainerCodeAsPassword(true);
     setEditing(null);
     setSelectedCourseIds([]);
     setGenderScope('');
+    setTrainerCodeCheck({ status: 'idle', message: '' });
+    setUsernameCheck({ status: 'idle', message: '' });
     setShowAddModal(true);
   };
 
@@ -495,7 +692,7 @@ export default function ManageTeachersPage() {
       username: teacher.username || '',
       email: teacher.profiles?.email || '',
       phone: teacher.profiles?.phone || '',
-      cnic: teacher.cnic || '',
+      cnic: sanitizeCnicInput(teacher.cnic || ''),
       province: teacher.province || '',
       region: teacher.region || '',
       district: teacher.district || '',
@@ -533,6 +730,10 @@ export default function ManageTeachersPage() {
   };
 
   const openResetPassword = (teacher: TeacherRow) => {
+    if (!canResetPasswords) {
+      toastError(denyMessage('can_reset_passwords'));
+      return;
+    }
     setResetTarget(teacher);
     setResetPassword('');
     setResetConfirm('');
@@ -541,30 +742,21 @@ export default function ManageTeachersPage() {
   const handleResetPassword = async () => {
     if (!resetTarget) return;
     if (resetPassword.length < 6) {
-      setMessage({ type: 'error', text: 'New password must be at least 6 characters.' });
+      toastError('New password must be at least 6 characters.');
       return;
     }
     if (resetPassword !== resetConfirm) {
-      setMessage({ type: 'error', text: 'Password and Confirm Password do not match.' });
+      toastError('Password and Confirm Password do not match.');
       return;
     }
 
     setResetting(true);
-    setMessage(null);
     try {
       await adminSetUserPassword(resetTarget.profiles.id, resetPassword);
-      setMessage({
-        type: 'success',
-        text: `Password updated for ${resetTarget.profiles.full_name}.`,
-      });
+      toastSuccess('Password updated.');
       setResetTarget(null);
-    } catch (err: any) {
-      setMessage({
-        type: 'error',
-        text:
-          err?.message ||
-          'Password reset failed. Deploy edge function admin-set-password.',
-      });
+    } catch (err: unknown) {
+      toastError(err, 'Password update failed.');
     } finally {
       setResetting(false);
     }
@@ -574,15 +766,36 @@ export default function ManageTeachersPage() {
     if (!editing) return;
     const validationError = validateRequired(form, 'edit');
     if (validationError) {
-      setMessage({ type: 'error', text: validationError });
+      toastError(validationError);
       return;
     }
+    if (trainerCodeCheck.status === 'invalid') {
+      toastError(trainerCodeCheck.message || 'Invalid Trainer Code.');
+      return;
+    }
+    if (canEditTeacherCredentials && usernameCheck.status === 'invalid') {
+      toastError(usernameCheck.message || 'Username already taken.');
+      return;
+    }
+
+    const codeTaken = await isTrainerCodeTaken(form.trainer_code.trim(), editing.id);
+    if (codeTaken) {
+      toastError('Trainer Code already in use.');
+      return;
+    }
+    if (canEditTeacherCredentials) {
+      const userTaken = await isUsernameTaken(form.username.trim(), editing.id);
+      if (userTaken) {
+        toastError('Username already taken.');
+        return;
+      }
+    }
+
     if (selectedCourseIds[0] && !genderScope) {
       // Allowed: course without gender → teacher sees 0 students
     }
 
     setSaving(true);
-    setMessage(null);
 
     const profileId = editing.profiles.id;
     const nextEmail = form.email.trim().toLowerCase();
@@ -610,10 +823,7 @@ export default function ManageTeachersPage() {
     ]);
 
     if (profileError || teacherError) {
-      setMessage({
-        type: 'error',
-        text: profileError?.message || teacherError?.message || 'Update failed',
-      });
+      toastError(profileError || teacherError, 'Update failed');
       setSaving(false);
       return;
     }
@@ -621,13 +831,8 @@ export default function ManageTeachersPage() {
     if (emailChanged) {
       try {
         await adminSetUserEmail(profileId, nextEmail);
-      } catch (err: any) {
-        setMessage({
-          type: 'error',
-          text:
-            err?.message ||
-            'Teacher saved, but login email update failed. Redeploy admin-set-password.',
-        });
+      } catch (err: unknown) {
+        toastError(err, 'Email update failed.');
         setSaving(false);
         await fetchTeachers();
         return;
@@ -636,18 +841,13 @@ export default function ManageTeachersPage() {
 
     try {
       await applyCourseAssignment(editing.id);
-    } catch (err: any) {
-      setMessage({
-        type: 'error',
-        text:
-          err?.message ||
-          'Teacher saved, but course assignment failed. Run allow_null_teacher_gender_scope.sql if needed.',
-      });
+    } catch (err: unknown) {
+      toastError(err, 'Course assignment failed.');
       setSaving(false);
       return;
     }
 
-    setMessage({ type: 'success', text: 'Teacher updated successfully.' });
+    toastSuccess('Teacher updated.');
     setEditing(null);
     setSaving(false);
     await fetchTeachers();
@@ -658,58 +858,73 @@ export default function ManageTeachersPage() {
     status: 'Approved' | 'Suspended' | 'Pending' | 'Rejected',
   ) => {
     if (!canChangeTeacherStatus) {
-      setMessage({ type: 'error', text: 'Only Super Admin can approve/reject/suspend teachers.' });
+      toastError('Only Super Admin can do this.');
       return;
     }
     const profileId = teacher.profiles?.id;
     if (!profileId) return;
     if (teacher.profiles.status === status) return;
-    if (!confirm(`Change status of ${teacher.profiles.full_name} to ${status}?`)) return;
+    const ok = await askConfirm({
+      title: 'Change teacher status?',
+      description: `Are you sure you want to set "${teacher.profiles.full_name}" to ${status}?`,
+      confirmLabel: `Yes, set ${status}`,
+      cancelLabel: 'Cancel',
+      tone: status === 'Approved' ? 'default' : 'warning',
+    });
+    if (!ok) return;
 
     const { error } = await supabase.from('profiles').update({ status }).eq('id', profileId);
     if (error) {
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Failed to update status.');
       return;
     }
-    setMessage({ type: 'success', text: `Teacher status set to ${status}.` });
+    toastSuccess(`Teacher status set to ${status}.`);
     await fetchTeachers();
   };
 
   const deleteTeacher = async (teacher: TeacherRow) => {
     if (!canDeleteTeacher) {
-      setMessage({ type: 'error', text: 'Only Super Admin can delete teachers.' });
+      toastError('Only Super Admin can do this.');
       return;
     }
     const name = teacher.profiles?.full_name || teacher.username || 'this teacher';
-    if (
-      !confirm(
-        `Delete teacher "${name}"?\n\nThis removes their teacher record and suspends the account. Auth login may still exist.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await askConfirm({
+      title: 'Delete teacher record?',
+      description: `Are you sure you want to remove "${name}"?\n\nThis deletes their teacher record and suspends the account. Auth login may still exist.`,
+      confirmLabel: 'Yes, delete teacher',
+      cancelLabel: 'Cancel',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     const profileId = teacher.profiles?.id;
     await supabase.from('teacher_courses').delete().eq('teacher_id', teacher.id);
     const { error: delError } = await supabase.from('teachers').delete().eq('id', teacher.id);
     if (delError) {
-      setMessage({ type: 'error', text: delError.message });
+      toastError(delError, 'Failed to delete teacher.');
       return;
     }
     if (profileId) {
       await supabase.from('profiles').update({ status: 'Suspended' }).eq('id', profileId);
     }
-    setMessage({ type: 'success', text: 'Teacher deleted and account suspended.' });
+    toastSuccess('Teacher removed.');
     await fetchTeachers();
   };
 
   const handleAddTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage(null);
 
     const validationError = validateRequired(form, 'add');
     if (validationError) {
-      setMessage({ type: 'error', text: validationError });
+      toastError(validationError);
+      return;
+    }
+    if (trainerCodeCheck.status === 'invalid') {
+      toastError(trainerCodeCheck.message || 'Invalid Trainer Code.');
+      return;
+    }
+    if (usernameCheck.status === 'invalid') {
+      toastError(usernameCheck.message || 'Username already taken.');
       return;
     }
     if (selectedCourseIds[0] && !genderScope) {
@@ -717,7 +932,18 @@ export default function ManageTeachersPage() {
     }
 
     if (!teacherRoleId) {
-      setMessage({ type: 'error', text: 'Teacher role not found in database.' });
+      toastError('Teacher role not found.');
+      return;
+    }
+
+    const codeTaken = await isTrainerCodeTaken(form.trainer_code.trim());
+    if (codeTaken) {
+      toastError('Trainer Code already in use.');
+      return;
+    }
+    const userTaken = await isUsernameTaken(form.username.trim());
+    if (userTaken) {
+      toastError('Username already taken.');
       return;
     }
 
@@ -734,6 +960,7 @@ export default function ManageTeachersPage() {
             full_name: form.full_name.trim(),
             role: 'Teacher',
             username: form.username.trim(),
+            trainer_code: form.trainer_code.trim(),
           },
         },
       });
@@ -766,43 +993,33 @@ export default function ManageTeachersPage() {
 
       if (existingProfile?.[0]) {
         const { error } = await supabase.from('profiles').update(profilePatch).eq('id', userId);
-        if (error) throw new Error(error.message);
+        if (error) throw error;
       } else {
         const { error } = await supabase.from('profiles').insert({ id: userId, ...profilePatch });
-        if (error) throw new Error(error.message);
+        if (error) throw error;
       }
 
-      await ensureTeacherRow(userId, form.specialization.trim() || 'General');
+      // Single insert/update with full payload (incl. username) — avoids Admin RLS
+      // failure when bare insert then username update was blocked.
+      const teacherId = await ensureTeacherRow(
+        userId,
+        form.specialization.trim() || 'General',
+        teacherPayload(form, true),
+      );
 
-      const { error: teacherUpdateError } = await supabase
-        .from('teachers')
-        .update(teacherPayload(form, true))
-        .eq('profile_id', userId);
-
-      if (teacherUpdateError) throw new Error(teacherUpdateError.message);
-
-      const { data: teacherRows } = await supabase
-        .from('teachers')
-        .select('id')
-        .eq('profile_id', userId)
-        .limit(1);
-
-      if (teacherRows?.[0]?.id) {
-        await applyCourseAssignment(teacherRows[0].id);
+      if (teacherId) {
+        await applyCourseAssignment(teacherId);
       }
 
-      setMessage({
-        type: 'success',
-        text: canChangeTeacherStatus
-          ? `Teacher "${form.full_name.trim()}" added and activated. Login email: ${form.email.trim()} (password set by admin).`
-          : `Teacher "${form.full_name.trim()}" added. Approval pending by Super Admin. Login email: ${form.email.trim()} (password set by admin).`,
-      });
+      toastSuccess(
+        canChangeTeacherStatus ? 'Teacher added.' : 'Teacher added (pending approval).',
+      );
       setForm(emptyForm);
-      setUseUsernameAsPassword(false);
+      setUseTrainerCodeAsPassword(true);
       setShowAddModal(false);
       await fetchTeachers();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err?.message || 'Failed to add teacher.' });
+    } catch (err: unknown) {
+      toastError(err, 'Failed to add teacher.');
     } finally {
       setSaving(false);
     }
@@ -810,10 +1027,9 @@ export default function ManageTeachersPage() {
 
   const syncMissingRows = async () => {
     setSyncing(true);
-    setMessage(null);
     try {
       if (!teacherRoleId) {
-        setMessage({ type: 'error', text: 'Teacher role not found.' });
+        toastError('Teacher role not found.');
         setSyncing(false);
         return;
       }
@@ -827,86 +1043,54 @@ export default function ManageTeachersPage() {
         await ensureTeacherRow(profile.id);
       }
 
-      // Sheet-based assignments from D:\BanoQabil\students filenames/trainers
-      // (UI sync only creates missing teacher rows; full sheet sync via assign_teachers_from_sheets.mjs)
-      setMessage({
-        type: 'success',
-        text: 'Teacher rows synced. Use “Assign from Sheets” or run assign_teachers_from_sheets.mjs for course + Male/Female.',
-      });
+      const { data: teacherList, error: listError } = await supabase
+        .from('teachers')
+        .select('id, profile_id, trainer_code');
+
+      if (listError) throw listError;
+
+      let assigned = 0;
+      let passwordSet = 0;
+      for (const t of teacherList ?? []) {
+        let code = isValidTrainerCode(t.trainer_code)
+          ? String(t.trainer_code).trim()
+          : '';
+
+        if (!code) {
+          code = await generateUniqueTrainerCode();
+          const { error } = await supabase
+            .from('teachers')
+            .update({ trainer_code: code })
+            .eq('id', t.id);
+          if (error) throw error;
+          assigned += 1;
+        }
+
+        if (t.profile_id && code) {
+          try {
+            await adminSetUserPassword(t.profile_id, code);
+            passwordSet += 1;
+          } catch (err) {
+            console.warn('Could not set password for teacher', t.profile_id, err);
+          }
+        }
+      }
+
+      if (assigned > 0 || passwordSet > 0) {
+        toastSuccess(
+          assigned > 0
+            ? `Assigned ${assigned} IDs · ${passwordSet} passwords.`
+            : `Passwords set for ${passwordSet} teachers.`,
+        );
+      } else {
+        toastSuccess('Teachers synced.');
+      }
       await fetchTeachers();
-    } catch (err: any) {
-      setMessage({
-        type: 'error',
-        text: err?.message || 'Sync failed (check RLS insert policy on teachers).',
-      });
+    } catch (err: unknown) {
+      toastError(err, 'Sync failed.');
     } finally {
       setSyncing(false);
     }
-  };
-
-  const assignFromSheets = async () => {
-    setSyncing(true);
-    setMessage(null);
-    try {
-      // Built-in map from students/*.xlsx trainers (must match seed TRAINER_EMAIL_MAP)
-      const PLAN: Array<{ email: string; course: string; scope: GenderScope }> = [
-        { email: 'zunairat69@gmail.com', course: 'Graphic Designing', scope: 'Female' },
-        { email: 'qasimlibra28@gmail.com', course: 'Graphic Designing', scope: 'Male' },
-        { email: 'hnaeemabbas1@gmail.com', course: 'Digital Marketing', scope: 'Both' },
-        { email: 'abdullahwale@gmail.com', course: 'Essential of AI', scope: 'Male' },
-        { email: 'ashmiramajeed14@gmail.com', course: 'Essential of AI', scope: 'Female' },
-        { email: 'sajjadkhanggg@gmail.com', course: 'Computer Information & Technology', scope: 'Both' },
-      ];
-
-      const courseByName = new Map(courses.map((c) => [c.name.toLowerCase(), c]));
-      const teachersByEmail = new Map(
-        teachers.map((t) => [String(t.profiles?.email || '').toLowerCase(), t]),
-      );
-
-      // Clear ALL teacher courses first, then apply sheet plan (unnamed → No Course)
-      for (const t of teachers) {
-        await setTeacherCourseAssignment(t.id, null, null);
-      }
-
-      for (const row of PLAN) {
-        const teacher = teachersByEmail.get(row.email.toLowerCase());
-        const course = courseByName.get(row.course.toLowerCase());
-        if (!teacher) {
-          console.warn('Teacher not in DB:', row.email);
-          continue;
-        }
-        if (!course) {
-          console.warn('Course not in DB:', row.course);
-          continue;
-        }
-        await setTeacherCourseAssignment(teacher.id, course.id, row.scope);
-      }
-
-      setMessage({
-        type: 'success',
-        text: 'Assigned courses from Excel sheets (Male/Female/Both). Teachers not in sheets have No Course.',
-      });
-      await fetchTeachers();
-    } catch (err: any) {
-      setMessage({
-        type: 'error',
-        text:
-          err?.message ||
-          'Sheet assign failed. Run add_teacher_gender_scope.sql in Supabase first.',
-      });
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const statusBadgeClass = (status: string | null) => {
-    if (status === 'Approved') {
-      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
-    }
-    if (status === 'Suspended' || status === 'Rejected') {
-      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
-    }
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
   };
 
   const renderFormFields = (mode: 'add' | 'edit') => (
@@ -925,20 +1109,36 @@ export default function ManageTeachersPage() {
           <FieldLabel required>User Name</FieldLabel>
           <Input
             value={form.username}
-            onChange={(e) => {
-              setField('username', e.target.value);
-              if (useUsernameAsPassword && mode === 'add') {
-                setField('password', e.target.value);
-                setField('confirmPassword', e.target.value);
-              }
-            }}
+            onChange={(e) => setField('username', e.target.value)}
             placeholder="e.g. ashmira.majeed"
             required
             disabled={mode === 'edit' && !canEditTeacherCredentials}
+            aria-invalid={usernameCheck.status === 'invalid'}
           />
           {mode === 'edit' && !canEditTeacherCredentials ? (
             <p className="text-xs text-muted-foreground">Only Super Admin can edit username.</p>
-          ) : null}
+          ) : usernameCheck.status !== 'idle' ? (
+            <p
+              className={`flex items-center gap-1.5 text-xs ${
+                usernameCheck.status === 'valid'
+                  ? 'text-green-600'
+                  : usernameCheck.status === 'checking'
+                    ? 'text-muted-foreground'
+                    : 'text-destructive'
+              }`}
+            >
+              {usernameCheck.status === 'valid' ? (
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              ) : usernameCheck.status === 'checking' ? (
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              ) : (
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              )}
+              {usernameCheck.message}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">Must be unique</p>
+          )}
         </div>
         <div className="space-y-2">
           <FieldLabel required>Trainer Email Address</FieldLabel>
@@ -955,50 +1155,113 @@ export default function ManageTeachersPage() {
           ) : null}
         </div>
 
+        <div className="space-y-2 sm:col-span-2">
+          <FieldLabel required>Trainer Code</FieldLabel>
+          <div className="flex gap-1.5">
+            <Input
+              value={form.trainer_code}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, '').slice(0, TRAINER_CODE_LENGTH);
+                setField('trainer_code', digits);
+                if (useTrainerCodeAsPassword && mode === 'add') {
+                  setField('password', digits);
+                  setField('confirmPassword', digits);
+                }
+              }}
+              placeholder={`7 digits e.g. 5210001`}
+              required
+              inputMode="numeric"
+              maxLength={TRAINER_CODE_LENGTH}
+              className="font-mono"
+              aria-invalid={trainerCodeCheck.status === 'invalid'}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-10 w-10 shrink-0"
+              disabled={generatingTrainerCode}
+              onClick={() => void handleAutoGenerateTrainerCode()}
+              title="Auto Generate"
+              aria-label="Auto Generate Trainer Code"
+            >
+              {generatingTrainerCode ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+          {trainerCodeCheck.status !== 'idle' ? (
+            <p
+              className={`flex items-center gap-1.5 text-xs ${
+                trainerCodeCheck.status === 'valid'
+                  ? 'text-green-600'
+                  : trainerCodeCheck.status === 'checking'
+                    ? 'text-muted-foreground'
+                    : 'text-destructive'
+              }`}
+            >
+              {trainerCodeCheck.status === 'valid' ? (
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              ) : trainerCodeCheck.status === 'checking' ? (
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              ) : (
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              )}
+              {trainerCodeCheck.message}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Exactly {TRAINER_CODE_LENGTH} digits · must be unique · click ✨ to generate
+            </p>
+          )}
+        </div>
+
         {mode === 'add' && (
           <>
             <div className="sm:col-span-2 flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
               <input
-                id="use-username-password"
+                id="use-trainer-code-password"
                 type="checkbox"
                 className="h-4 w-4"
-                checked={useUsernameAsPassword}
+                checked={useTrainerCodeAsPassword}
                 onChange={(e) => {
                   const checked = e.target.checked;
-                  setUseUsernameAsPassword(checked);
+                  setUseTrainerCodeAsPassword(checked);
                   if (checked) {
-                    setField('password', form.username);
-                    setField('confirmPassword', form.username);
+                    setField('password', form.trainer_code);
+                    setField('confirmPassword', form.trainer_code);
                   } else {
                     setField('password', '');
                     setField('confirmPassword', '');
                   }
                 }}
               />
-              <label htmlFor="use-username-password" className="text-sm cursor-pointer">
-                Use User Name as Password
+              <label htmlFor="use-trainer-code-password" className="text-sm cursor-pointer">
+                Use Trainer Code as Password
               </label>
             </div>
             <div className="space-y-2">
-              <FieldLabel required>Password</FieldLabel>
+              <FieldLabel required={!useTrainerCodeAsPassword}>Password</FieldLabel>
               <Input
                 type="password"
-                value={form.password}
+                value={useTrainerCodeAsPassword ? form.trainer_code : form.password}
                 onChange={(e) => setField('password', e.target.value)}
                 placeholder="Min 6 characters"
-                required={!useUsernameAsPassword}
-                disabled={useUsernameAsPassword}
+                required={!useTrainerCodeAsPassword}
+                disabled={useTrainerCodeAsPassword}
               />
             </div>
             <div className="space-y-2">
-              <FieldLabel required>Confirm Password</FieldLabel>
+              <FieldLabel required={!useTrainerCodeAsPassword}>Confirm Password</FieldLabel>
               <Input
                 type="password"
-                value={form.confirmPassword}
+                value={useTrainerCodeAsPassword ? form.trainer_code : form.confirmPassword}
                 onChange={(e) => setField('confirmPassword', e.target.value)}
                 placeholder="Re-enter password"
-                required={!useUsernameAsPassword}
-                disabled={useUsernameAsPassword}
+                required={!useTrainerCodeAsPassword}
+                disabled={useTrainerCodeAsPassword}
               />
             </div>
           </>
@@ -1007,10 +1270,16 @@ export default function ManageTeachersPage() {
           <FieldLabel required>CNIC or Form-B</FieldLabel>
           <Input
             value={form.cnic}
-            onChange={(e) => setField('cnic', e.target.value)}
-            placeholder="Without dashes"
+            onChange={(e) => setField('cnic', sanitizeCnicInput(e.target.value))}
+            placeholder={`${CNIC_LENGTH} digits (no dashes)`}
             required
+            inputMode="numeric"
+            maxLength={CNIC_LENGTH}
+            autoComplete="off"
           />
+          <p className="text-xs text-muted-foreground">
+            Exactly {CNIC_LENGTH} digits · {form.cnic.length}/{CNIC_LENGTH}
+          </p>
         </div>
         <div className="space-y-2">
           <FieldLabel required>Contact Number</FieldLabel>
@@ -1023,39 +1292,82 @@ export default function ManageTeachersPage() {
         </div>
         <div className="space-y-2">
           <FieldLabel required>Province</FieldLabel>
-          <Input
+          <select
+            className={selectClassName}
             value={form.province}
-            onChange={(e) => setField('province', e.target.value)}
-            placeholder="Punjab"
+            onChange={(e) => setLocationField('province', e.target.value)}
             required
-          />
+          >
+            <option value="">Select province</option>
+            {withCurrentOption(getProvinces(), form.province).map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="space-y-2">
           <FieldLabel required>Region</FieldLabel>
-          <Input
+          <select
+            className={selectClassName}
             value={form.region}
-            onChange={(e) => setField('region', e.target.value)}
-            placeholder="South Punjab"
+            onChange={(e) => setLocationField('region', e.target.value)}
             required
-          />
+            disabled={!form.province}
+          >
+            <option value="">
+              {form.province ? 'Select region' : 'Select province first'}
+            </option>
+            {withCurrentOption(getRegions(form.province), form.region).map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="space-y-2">
           <FieldLabel required>District</FieldLabel>
-          <Input
+          <select
+            className={selectClassName}
             value={form.district}
-            onChange={(e) => setField('district', e.target.value)}
-            placeholder="Vehari"
+            onChange={(e) => setLocationField('district', e.target.value)}
             required
-          />
+            disabled={!form.province || !form.region}
+          >
+            <option value="">
+              {form.region ? 'Select district' : 'Select region first'}
+            </option>
+            {withCurrentOption(
+              getDistricts(form.province, form.region),
+              form.district,
+            ).map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="space-y-2">
           <FieldLabel required>City</FieldLabel>
-          <Input
+          <select
+            className={selectClassName}
             value={form.city}
-            onChange={(e) => setField('city', e.target.value)}
-            placeholder="Vehari"
+            onChange={(e) => setLocationField('city', e.target.value)}
             required
-          />
+            disabled={!form.province || !form.region || !form.district}
+          >
+            <option value="">
+              {form.district ? 'Select city' : 'Select district first'}
+            </option>
+            {withCurrentOption(
+              getCities(form.province, form.region, form.district),
+              form.city,
+            ).map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="space-y-2">
           <FieldLabel>Experience</FieldLabel>
@@ -1071,14 +1383,6 @@ export default function ManageTeachersPage() {
             value={form.specialization}
             onChange={(e) => setField('specialization', e.target.value)}
             placeholder="Optional"
-          />
-        </div>
-        <div className="space-y-2">
-          <FieldLabel>Trainer Code</FieldLabel>
-          <Input
-            value={form.trainer_code}
-            onChange={(e) => setField('trainer_code', e.target.value)}
-            placeholder="Optional code / ID"
           />
         </div>
         <div className="space-y-2 sm:col-span-2">
@@ -1112,141 +1416,137 @@ export default function ManageTeachersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center flex-wrap gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Manage Teachers</h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="mt-1 text-muted-foreground">
             {canChangeTeacherStatus
-              ? 'All teachers — edit username/email, change status, or delete (Super Admin).'
-              : 'Course + who they teach (Male / Female / Both). Teacher status is managed by Super Admin.'}
+              ? 'View, filter, and manage teachers — approve, edit, or assign courses.'
+              : 'View teachers and assign courses. Status is managed by Super Admin.'}
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" className="gap-2" onClick={syncMissingRows} disabled={syncing}>
-            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={syncMissingRows}
+            disabled={syncing}
+            title="Assign missing Trainer Codes and set passwords to those IDs"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
             Sync Records
           </Button>
-          <Button variant="outline" className="gap-2" onClick={assignFromSheets} disabled={syncing}>
-            <UserCheck className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-            Assign from Sheets
-          </Button>
           <Button className="gap-2" onClick={openAdd}>
-            <Plus className="w-4 h-4" /> Add Teacher
+            <Plus className="h-4 w-4" /> Add Teacher
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Card className="border-l-4 border-l-slate-400 shadow-sm">
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Teachers</p>
-            <p className="text-2xl font-bold mt-1">{teacherStats.total}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{teacherStats.total}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-l-4 border-l-green-500 shadow-sm">
           <CardContent className="p-4">
-            <p className="text-xs text-sky-700 uppercase tracking-wide font-medium">Only Male</p>
-            <p className="text-2xl font-bold mt-1 text-sky-800">{teacherStats.maleOnly}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-green-700">Approved</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-green-800">{teacherStats.approved}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-l-4 border-l-amber-500 shadow-sm">
           <CardContent className="p-4">
-            <p className="text-xs text-pink-700 uppercase tracking-wide font-medium">Only Female</p>
-            <p className="text-2xl font-bold mt-1 text-pink-800">{teacherStats.femaleOnly}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-amber-700">Pending</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-amber-800">{teacherStats.pending}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-l-4 border-l-slate-300 shadow-sm">
           <CardContent className="p-4">
-            <p className="text-xs text-violet-700 uppercase tracking-wide font-medium">Both</p>
-            <p className="text-2xl font-bold mt-1 text-violet-800">{teacherStats.both}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">No Course</p>
-            <p className="text-2xl font-bold mt-1">{teacherStats.noCourse}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">No Course</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{teacherStats.noCourse}</p>
           </CardContent>
         </Card>
       </div>
 
-      {message && (
-        <div
-          className={`rounded-md border px-4 py-3 text-sm ${
-            message.type === 'success'
-              ? 'border-green-300 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-900/20 dark:text-green-300'
-              : 'border-destructive/40 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
-      <Card className="shadow-sm overflow-hidden">
+      <Card className="overflow-hidden shadow-sm">
         <CardContent className="p-0">
-          <div className="p-4 border-b flex flex-wrap gap-3 items-center justify-between bg-muted/20">
-            <div className="relative w-72 max-w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search name, email, username, city..."
-                className="pl-9 bg-background"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
+          <div className="space-y-3 border-b bg-muted/20 p-4">
             <div className="flex flex-wrap gap-2">
-              <select
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-                value={genderFilter}
-                onChange={(e) => setGenderFilter(e.target.value as typeof genderFilter)}
-              >
-                <option value="All">All Classes</option>
-                <option value="Male">Only Male</option>
-                <option value="Female">Only Female</option>
-                <option value="Both">Both</option>
-                <option value="None">No Course</option>
-              </select>
+              {(
+                [
+                  { key: 'All' as const, label: 'All', count: teacherStats.total },
+                  { key: 'Male' as const, label: 'Male', count: teacherStats.maleOnly },
+                  { key: 'Female' as const, label: 'Female', count: teacherStats.femaleOnly },
+                  { key: 'Both' as const, label: 'Both', count: teacherStats.both },
+                  { key: 'None' as const, label: 'No Course', count: teacherStats.noCourse },
+                ]
+              ).map((chip) => (
+                <Button
+                  key={chip.key}
+                  type="button"
+                  size="sm"
+                  variant={genderFilter === chip.key ? 'default' : 'outline'}
+                  onClick={() => setGenderFilter(chip.key)}
+                >
+                  {chip.label} ({chip.count})
+                </Button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative w-full max-w-sm">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search name, email, username, code..."
+                  className="bg-background pl-9"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
               <select
                 className="h-10 rounded-md border bg-background px-3 text-sm"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
               >
                 <option value="All">All Status</option>
-                <option value="Approved">Approved</option>
-                <option value="Suspended">Suspended</option>
-                <option value="Pending">Pending</option>
-                <option value="Rejected">Rejected</option>
+                <option value="Approved">Approved ({teacherStats.approved})</option>
+                <option value="Pending">Pending ({teacherStats.pending})</option>
+                <option value="Suspended">Suspended ({teacherStats.suspended})</option>
+                <option value="Rejected">Rejected ({teacherStats.rejected})</option>
               </select>
+              <p className="ml-auto text-sm text-muted-foreground">
+                {filteredTeachers.length} result(s)
+              </p>
             </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-muted-foreground bg-muted/50 uppercase tracking-wide">
+            <table className="w-full min-w-[820px] text-left text-sm">
+              <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th className="px-4 py-3.5 font-semibold">SR#</th>
-                  <th className="px-4 py-3.5 font-semibold">Teacher</th>
-                  <th className="px-4 py-3.5 font-semibold">Contact</th>
-                  <th className="px-4 py-3.5 font-semibold">City</th>
-                  <th className="px-4 py-3.5 font-semibold">Course</th>
-                  <th className="px-4 py-3.5 font-semibold">Teaches</th>
-                  <th className="px-4 py-3.5 font-semibold">Status</th>
-                  <th className="px-4 py-3.5 font-semibold text-right">Actions</th>
+                  <th className="w-12 px-4 py-3 font-semibold">#</th>
+                  <th className="px-4 py-3 font-semibold">Code</th>
+                  <th className="px-4 py-3 font-semibold">Teacher</th>
+                  <th className="px-4 py-3 font-semibold">Contact</th>
+                  <th className="px-4 py-3 font-semibold">Course / Class</th>
+                  <th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 text-right font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-10">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
+                    <td colSpan={7} className="py-12 text-center">
+                      <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
                     </td>
                   </tr>
                 ) : filteredTeachers.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12">
-                      <Users className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+                    <td colSpan={7} className="py-12 text-center">
+                      <Users className="mx-auto mb-3 h-12 w-12 text-muted-foreground/30" />
                       <p className="text-muted-foreground">No teachers found</p>
                       <Button className="mt-4 gap-2" onClick={openAdd}>
-                        <Plus className="w-4 h-4" /> Add Teacher
+                        <Plus className="h-4 w-4" /> Add Teacher
                       </Button>
                     </td>
                   </tr>
@@ -1265,49 +1565,67 @@ export default function ManageTeachersPage() {
                       .join('');
 
                     return (
-                      <tr key={t.id} className="border-b hover:bg-muted/30 transition-colors">
-                        <td className="px-4 py-4 text-muted-foreground font-medium">{index + 1}</td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-3 min-w-[180px]">
+                      <tr key={t.id} className="border-b last:border-0 hover:bg-muted/25">
+                        <td className="px-4 py-3 font-medium text-muted-foreground">{index + 1}</td>
+                        <td className="px-4 py-3">
+                          <span className="font-mono text-xs font-semibold tabular-nums">
+                            {t.trainer_code || '—'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                              {initials || <GraduationCap className="h-4 w-4" />}
+                              {initials || 'T'}
                             </div>
-                            <div>
-                              <p className="font-semibold leading-tight">{t.profiles.full_name}</p>
-                              <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                            <div className="min-w-0">
+                              <p className="truncate font-medium leading-tight">
+                                {t.profiles.full_name || '—'}
+                              </p>
+                              <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
                                 @{t.username || '—'}
+                                {t.city ? ` · ${t.city}` : ''}
                               </p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-4">
-                          <p className="text-sm">{t.profiles.email}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
+                        <td className="px-4 py-3">
+                          <p className="max-w-[200px] truncate text-sm">{t.profiles.email || '—'}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
                             {t.profiles.phone || 'No phone'}
                           </p>
                         </td>
-                        <td className="px-4 py-4">{t.city || '—'}</td>
-                        <td className="px-4 py-4">
-                          {courseName ? (
-                            <span className="inline-flex max-w-[200px] items-center rounded-md border bg-background px-2.5 py-1 text-xs font-medium">
-                              {courseName}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">No Course</span>
-                          )}
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col items-start gap-1.5">
+                            {courseName ? (
+                              <span className="inline-flex max-w-[180px] truncate rounded bg-muted px-2 py-0.5 text-xs font-medium">
+                                {courseName}
+                              </span>
+                            ) : (
+                              <span className="text-xs italic text-muted-foreground">Unassigned</span>
+                            )}
+                            {scopeBadge(scope, hasCourse)}
+                          </div>
                         </td>
-                        <td className="px-4 py-4">{scopeBadge(scope, hasCourse)}</td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-3">
                           <span
-                            className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${statusBadgeClass(
+                            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusBadgeClass(
                               t.profiles.status,
                             )}`}
                           >
-                            {t.profiles.status}
+                            {t.profiles.status || '—'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-right">
-                          <div className="flex justify-end gap-1 items-center flex-wrap">
+                        <td className="px-4 py-3 text-right">
+                          <div className="inline-flex items-center gap-0.5 rounded-lg border bg-background p-0.5 shadow-sm">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title="View details"
+                              onClick={() => setViewing(t)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"
@@ -1315,20 +1633,21 @@ export default function ManageTeachersPage() {
                               title="Edit"
                               onClick={() => openEdit(t)}
                             >
-                              <Edit className="w-4 h-4" />
+                              <Edit className="h-4 w-4" />
                             </Button>
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
                               title="Reset Password"
+                              disabled={!canResetPasswords}
                               onClick={() => openResetPassword(t)}
                             >
-                              <KeyRound className="w-4 h-4" />
+                              <KeyRound className="h-4 w-4" />
                             </Button>
                             {canChangeTeacherStatus ? (
                               <select
-                                className="h-8 max-w-[120px] rounded-md border bg-background px-2 text-xs"
+                                className="h-8 max-w-[108px] rounded-md border-0 bg-transparent px-1 text-xs outline-none"
                                 value={t.profiles.status || 'Pending'}
                                 title="Change status"
                                 onChange={(e) =>
@@ -1352,7 +1671,7 @@ export default function ManageTeachersPage() {
                                 title="Delete teacher"
                                 onClick={() => deleteTeacher(t)}
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             ) : null}
                           </div>
@@ -1366,6 +1685,91 @@ export default function ManageTeachersPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* View Teacher Details */}
+      {viewing && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-2xl shadow-lg border-none max-h-[90vh] overflow-y-auto">
+            <CardContent className="p-6 space-y-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold">Teacher Details</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {viewing.profiles.full_name || '—'}
+                  </p>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setViewing(null)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${statusBadgeClass(
+                    viewing.profiles.status,
+                  )}`}
+                >
+                  {viewing.profiles.status || '—'}
+                </span>
+                {scopeBadge(
+                  teacherScopeMap[viewing.id],
+                  (teacherCourseMap[viewing.id] ?? []).length > 0,
+                )}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 text-sm">
+                {(
+                  [
+                    ['Trainer Code', viewing.trainer_code || '—'],
+                    ['Username', viewing.username ? `@${viewing.username}` : '—'],
+                    ['Email', viewing.profiles.email || '—'],
+                    ['Phone', viewing.profiles.phone || '—'],
+                    ['CNIC', viewing.cnic || '—'],
+                    ['Province', viewing.province || '—'],
+                    ['Region', viewing.region || '—'],
+                    ['District', viewing.district || '—'],
+                    ['City', viewing.city || '—'],
+                    ['Experience', viewing.experience || '—'],
+                    ['Specialization', viewing.specialization || '—'],
+                    [
+                      'Course',
+                      (teacherCourseMap[viewing.id] ?? [])
+                        .map((id) => courses.find((c) => c.id === id)?.name)
+                        .filter(Boolean)[0] || 'Unassigned',
+                    ],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label} className="rounded-md border bg-muted/20 px-3 py-2">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+                    <p className="mt-0.5 font-medium break-all">{value}</p>
+                  </div>
+                ))}
+                <div className="rounded-md border bg-muted/20 px-3 py-2 sm:col-span-2">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Address</p>
+                  <p className="mt-0.5 font-medium">
+                    {viewing.address || viewing.profiles.address || '—'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2 pt-1">
+                <Button variant="outline" onClick={() => setViewing(null)}>
+                  Close
+                </Button>
+                <Button
+                  onClick={() => {
+                    const t = viewing;
+                    setViewing(null);
+                    void openEdit(t);
+                  }}
+                >
+                  Edit Teacher
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Edit Modal */}
       {editing && (
@@ -1401,7 +1805,7 @@ export default function ManageTeachersPage() {
                 <div>
                   <h2 className="text-xl font-bold">Add Teacher</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Set a password yourself, or tick “Use User Name as Password”.
+                    Click ✨ Auto Generate to create a unique Trainer Code (used as password).
                   </p>
                 </div>
                 <Button variant="ghost" size="icon" onClick={() => setShowAddModal(false)}>
@@ -1412,8 +1816,8 @@ export default function ManageTeachersPage() {
               <form onSubmit={handleAddTeacher} className="space-y-4">
                 {renderFormFields('add')}
                 <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                  Fields marked <span className="text-destructive">*</span> are required. Admin
-                  chooses the teacher password at create time.
+                  Fields marked <span className="text-destructive">*</span> are required. Login
+                  password defaults to the Trainer Code.
                 </div>
                 <div className="flex justify-end gap-3 pt-2">
                   <Button type="button" variant="outline" onClick={() => setShowAddModal(false)}>
@@ -1440,6 +1844,14 @@ export default function ManageTeachersPage() {
                   <p className="text-sm text-muted-foreground mt-1">
                     {resetTarget.profiles.full_name} · {resetTarget.profiles.email}
                   </p>
+                  {resetTarget.trainer_code ? (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Trainer Code:{' '}
+                      <span className="font-mono font-medium text-foreground">
+                        {resetTarget.trainer_code}
+                      </span>
+                    </p>
+                  ) : null}
                 </div>
                 <Button variant="ghost" size="icon" onClick={() => setResetTarget(null)}>
                   <X className="w-4 h-4" />

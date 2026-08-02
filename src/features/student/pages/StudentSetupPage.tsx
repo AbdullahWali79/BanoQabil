@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
+import { toastError, toastInfo, toastSuccess } from '@/lib/notify';
 import { ensureStudentRow } from '@/features/teacher/utils/teacherData';
 import { getStudentContext } from '@/features/student/utils/studentData';
 
@@ -40,13 +41,11 @@ export default function StudentSetupPage() {
   const [lockedByAdmin, setLockedByAdmin] = useState(false);
   const [courseName, setCourseName] = useState('');
   const [batchName, setBatchName] = useState('');
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     async function loadSetupData() {
       if (!user?.id) return;
       setLoading(true);
-      setMessage(null);
 
       const ctx = await getStudentContext(user.id);
       setCourseName(ctx?.courseName || '');
@@ -66,23 +65,14 @@ export default function StudentSetupPage() {
           const createdId = await ensureStudentRow(user.id);
           if (createdId) student = { id: createdId, batch_id: null, course_id: null };
         } catch (err: unknown) {
-          setMessage({
-            type: 'error',
-            text:
-              err instanceof Error
-                ? err.message
-                : 'Student profile not found. Please ask admin to create your student record first.',
-          });
+          toastError(err, 'Student profile not found. Contact admin.');
           setLoading(false);
           return;
         }
       }
 
       if (studentError || !student) {
-        setMessage({
-          type: 'error',
-          text: 'Student profile not found. Please ask admin to create your student record first.',
-        });
+        toastError('Student profile not found. Contact admin.');
         setLoading(false);
         return;
       }
@@ -115,19 +105,15 @@ export default function StudentSetupPage() {
 
   const handleSave = async () => {
     if (lockedByAdmin) {
-      setMessage({
-        type: 'error',
-        text: 'Your class is assigned by admin. Contact admin to change course/batch.',
-      });
+      toastInfo('Class assigned by admin.');
       return;
     }
     if (!studentRowId || !selectedBatchId) {
-      setMessage({ type: 'error', text: 'Please select your course and batch before saving.' });
+      toastError('Select course and batch.');
       return;
     }
 
     setSaving(true);
-    setMessage(null);
 
     const { error } = await supabase
       .from('students')
@@ -138,9 +124,9 @@ export default function StudentSetupPage() {
       .eq('id', studentRowId);
 
     if (error) {
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Save failed.');
     } else {
-      setMessage({ type: 'success', text: 'Course and batch saved.' });
+      toastSuccess('Enrollment saved.');
       setLockedByAdmin(true);
     }
     setSaving(false);
@@ -250,18 +236,6 @@ export default function StudentSetupPage() {
               </div>
             ) : null}
 
-            {message ? (
-              <div
-                className={`rounded-md px-4 py-3 text-sm ${
-                  message.type === 'success'
-                    ? 'border border-green-300 bg-green-50 text-green-700'
-                    : 'border border-destructive/40 bg-destructive/10 text-destructive'
-                }`}
-              >
-                {message.text}
-              </div>
-            ) : null}
-
             <div className="flex justify-end">
               <Button onClick={() => void handleSave()} disabled={saving || !selectedBatchId}>
                 {saving ? 'Saving...' : 'Save Enrollment'}
@@ -270,18 +244,6 @@ export default function StudentSetupPage() {
           </CardContent>
         </Card>
       )}
-
-      {message && lockedByAdmin ? (
-        <div
-          className={`rounded-md px-4 py-3 text-sm ${
-            message.type === 'success'
-              ? 'border border-green-300 bg-green-50 text-green-700'
-              : 'border border-destructive/40 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {message.text}
-        </div>
-      ) : null}
     </div>
   );
 }

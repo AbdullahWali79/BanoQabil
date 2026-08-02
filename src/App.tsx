@@ -3,7 +3,11 @@ import { AppRoutes } from './routes';
 import { supabase } from './lib/supabase';
 import { useAuthStore } from './store/authStore';
 import { effectiveAppRole } from './lib/roles';
+import { normalizePermissions } from './lib/permissions';
 import type { User } from '@supabase/supabase-js';
+import type { AdminPermissions } from './types';
+import { AppToaster } from './components/ui/AppToaster';
+import { ConfirmDialogHost } from './components/ui/ConfirmDialogHost';
 
 /**
  * Resolve role without embedding `roles(name)` — that join often 400s when the
@@ -16,7 +20,7 @@ async function resolveAuthContext(user: User) {
   try {
     const fetchProfileById = await supabase
       .from('profiles')
-      .select('id, email, status, role_id')
+      .select('id, email, status, role_id, permissions')
       .eq('id', user.id)
       .limit(1);
 
@@ -25,7 +29,7 @@ async function resolveAuthContext(user: User) {
     if (!profile && user.email) {
       const fetchProfileByEmail = await supabase
         .from('profiles')
-        .select('id, email, status, role_id')
+        .select('id, email, status, role_id, permissions')
         .eq('email', user.email)
         .limit(1);
       profile = fetchProfileByEmail.data?.[0] ?? null;
@@ -66,8 +70,14 @@ async function resolveAuthContext(user: User) {
 
     const role = effectiveAppRole(email, resolvedRole ?? fallbackRole);
     const status = profile?.status ?? (role ? 'Approved' : null);
+    const permissions: AdminPermissions | null =
+      role === 'Admin' || role === 'Super Admin'
+        ? normalizePermissions(
+            (profile?.permissions as Record<string, boolean> | null) ?? null,
+          )
+        : null;
 
-    return { role, status };
+    return { role, status, permissions };
   } catch {
     const email = user.email ?? null;
     const fallbackRole =
@@ -76,12 +86,13 @@ async function resolveAuthContext(user: User) {
     return {
       role,
       status: role ? 'Approved' : null,
+      permissions: role === 'Admin' || role === 'Super Admin' ? normalizePermissions(null) : null,
     };
   }
 }
 
 function App() {
-  const { setUser, setRole, setStatus, setLoading } = useAuthStore();
+  const { setUser, setRole, setStatus, setPermissions, setLoading } = useAuthStore();
 
   useEffect(() => {
     let mounted = true;
@@ -98,12 +109,14 @@ function App() {
           // Final guard — never store Super Admin unless designated email
           setRole(effectiveAppRole(session.user.email, context.role));
           setStatus(context.status);
+          setPermissions(context.permissions);
         } finally {
           if (mounted) setLoading(false);
         }
       } else {
         setRole(null);
         setStatus(null);
+        setPermissions(null);
         setLoading(false);
       }
     };
@@ -128,9 +141,15 @@ function App() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [setUser, setRole, setStatus, setLoading]);
+  }, [setUser, setRole, setStatus, setPermissions, setLoading]);
 
-  return <AppRoutes />;
+  return (
+    <>
+      <AppToaster />
+      <ConfirmDialogHost />
+      <AppRoutes />
+    </>
+  );
 }
 
 export default App;

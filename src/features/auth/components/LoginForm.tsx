@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router';
 import { supabase } from '@/lib/supabase';
+import { toastError } from '@/lib/notify';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,7 +26,6 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const setAuthLoading = useAuthStore((s) => s.setLoading);
 
@@ -39,8 +39,7 @@ export function LoginForm() {
 
   async function onSubmit(data: LoginFormValues) {
     setIsLoading(true);
-    setError(null);
-    
+
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: data.email,
       password: data.password,
@@ -49,7 +48,7 @@ export function LoginForm() {
     setIsLoading(false);
 
     if (signInError) {
-      setError(signInError.message);
+      toastError(signInError, 'Wrong email or password.');
       return;
     }
 
@@ -93,9 +92,6 @@ export function LoginForm() {
               </FormItem>
             )}
           />
-          
-          {error && <p className="text-sm text-destructive text-center font-medium">{error}</p>}
-          
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? 'Signing in...' : 'Sign In'}
           </Button>

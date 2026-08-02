@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
+import { toastError, toastSuccess } from '@/lib/notify';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -43,7 +44,6 @@ export default function TeacherAttendancePage() {
   const [marks, setMarks] = useState<Record<string, Status>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [stats, setStats] = useState<Record<string, { present: number; total: number }>>({});
   const [genderTab, setGenderTab] = useState<GenderTab>(() => {
     const g = searchParams.get('gender');
@@ -63,7 +63,6 @@ export default function TeacherAttendancePage() {
   const load = async () => {
     if (!user?.id) return;
     setLoading(true);
-    setMessage(null);
     try {
       const assigned = await getTeacherAssignedCourse(user.id);
       setCourseName(assigned?.name ?? null);
@@ -115,13 +114,8 @@ export default function TeacherAttendancePage() {
         }
         setStats(agg);
       }
-    } catch (err: any) {
-      setMessage({
-        type: 'error',
-        text:
-          err?.message ||
-          'Failed to load attendance. Run teacher_attendance_notifications.sql in Supabase.',
-      });
+    } catch (err: unknown) {
+      toastError(err, 'Failed to load attendance.');
     } finally {
       setLoading(false);
     }
@@ -187,12 +181,10 @@ export default function TeacherAttendancePage() {
   const saveAttendance = async () => {
     if (!visibleStudents.length) return;
     setSaving(true);
-    setMessage(null);
     try {
       const batches = await getTeacherBatches(user!.id);
       const defaultBatchId = batches[0]?.id ?? null;
 
-      // Save only the active gender group (separate attendance sessions)
       const rows = visibleStudents.map((s) => ({
         student_id: s.id,
         teacher_id: teacherId,
@@ -206,18 +198,10 @@ export default function TeacherAttendancePage() {
       });
       if (error) throw error;
 
-      setMessage({
-        type: 'success',
-        text: `${genderTab} attendance saved for ${date} (${rows.length} students).`,
-      });
+      toastSuccess('Attendance saved.');
       await load();
-    } catch (err: any) {
-      setMessage({
-        type: 'error',
-        text:
-          err?.message ||
-          'Save failed. Run teacher_attendance_notifications.sql in Supabase SQL Editor.',
-      });
+    } catch (err: unknown) {
+      toastError(err, 'Save failed.');
     } finally {
       setSaving(false);
     }
@@ -249,18 +233,6 @@ export default function TeacherAttendancePage() {
           </Button>
         </div>
       </div>
-
-      {message && (
-        <div
-          className={`rounded-md border px-4 py-3 text-sm ${
-            message.type === 'success'
-              ? 'border-green-300 bg-green-50 text-green-700'
-              : 'border-destructive/40 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
 
       <div className="flex flex-wrap gap-2">
         {(['Female', 'Male'] as GenderTab[]).map((tab) => (

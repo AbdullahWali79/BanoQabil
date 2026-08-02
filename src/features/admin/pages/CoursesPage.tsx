@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { toastSuccess, toastError } from '@/lib/notify';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -40,8 +41,6 @@ export default function CoursesPage() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
   const [showCourseForm, setShowCourseForm] = useState(false);
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
@@ -67,16 +66,14 @@ export default function CoursesPage() {
 
   const fetchData = async () => {
     setLoading(true);
-    setErrorMessage('');
-
     const [coursesRes, batchesRes, teachersRes] = await Promise.all([
       supabase.from('courses').select('*').order('name'),
       supabase.from('batches').select('*').order('name'),
       supabase.from('teachers').select('id, profiles(full_name, status)'),
     ]);
 
-    if (coursesRes.error) setErrorMessage(coursesRes.error.message);
-    if (batchesRes.error) setErrorMessage(batchesRes.error.message);
+    if (coursesRes.error) toastError(coursesRes.error, 'Failed to load courses.');
+    if (batchesRes.error) toastError(batchesRes.error, 'Failed to load batches.');
 
     const courseRows = (coursesRes.data ?? []) as Course[];
     setCourses(courseRows);
@@ -169,8 +166,6 @@ export default function CoursesPage() {
     e.preventDefault();
     if (!courseForm.name.trim()) return;
     setSaving(true);
-    setErrorMessage('');
-    setSuccessMessage('');
 
     const isFree = courseForm.is_free;
     const initialFee = isFree
@@ -184,7 +179,7 @@ export default function CoursesPage() {
         ? 0
         : Number(courseForm.monthly_fee);
     if (Number.isNaN(initialFee) || Number.isNaN(monthlyFee) || initialFee < 0 || monthlyFee < 0) {
-      setErrorMessage('Fees must be valid numbers (0 or more).');
+      toastError('Fees must be valid numbers (0 or more).');
       setSaving(false);
       return;
     }
@@ -199,12 +194,12 @@ export default function CoursesPage() {
 
     if (editingCourse) {
       const { error } = await supabase.from('courses').update(payload).eq('id', editingCourse.id);
-      if (error) setErrorMessage(error.message);
-      else setSuccessMessage('Course updated.');
+      if (error) toastError(error, 'Something went wrong.');
+      else toastSuccess('Course updated.');
     } else {
       const { error } = await supabase.from('courses').insert(payload);
-      if (error) setErrorMessage(error.message);
-      else setSuccessMessage('Course created.');
+      if (error) toastError(error, 'Something went wrong.');
+      else toastSuccess('Course created.');
     }
 
     setSaving(false);
@@ -243,12 +238,10 @@ export default function CoursesPage() {
   const saveBatch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!batchForm.name.trim() || !batchForm.course_id) {
-      setErrorMessage('Batch name and course are required.');
+      toastError('Batch name and course are required.');
       return;
     }
     setSaving(true);
-    setErrorMessage('');
-    setSuccessMessage('');
 
     const cleanName = cleanBatchDisplayName(batchForm.name.trim());
 
@@ -263,12 +256,12 @@ export default function CoursesPage() {
 
     if (editingBatch) {
       const { error } = await supabase.from('batches').update(payload).eq('id', editingBatch.id);
-      if (error) setErrorMessage(error.message);
-      else setSuccessMessage('Batch updated.');
+      if (error) toastError(error, 'Something went wrong.');
+      else toastSuccess('Batch updated.');
     } else {
       const { error } = await supabase.from('batches').insert(payload);
-      if (error) setErrorMessage(error.message);
-      else setSuccessMessage('Batch created.');
+      if (error) toastError(error, 'Something went wrong.');
+      else toastSuccess('Batch created.');
     }
 
     setSaving(false);
@@ -284,7 +277,7 @@ export default function CoursesPage() {
       .select('id, application_id, profiles(full_name, email)')
       .eq('batch_id', batchId);
     if (error) {
-      setErrorMessage(error.message);
+      toastError(error, 'Something went wrong.');
       setBatchStudents([]);
     } else {
       setBatchStudents(data ?? []);
@@ -309,18 +302,6 @@ export default function CoursesPage() {
           </Button>
         </div>
       </div>
-
-      {(errorMessage || successMessage) && (
-        <div
-          className={`rounded-md border px-4 py-3 text-sm ${
-            successMessage
-              ? 'border-green-300 bg-green-50 text-green-700'
-              : 'border-destructive/40 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {errorMessage || successMessage}
-        </div>
-      )}
 
       {showCourseForm && (
         <Card>

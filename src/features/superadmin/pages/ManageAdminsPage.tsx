@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, createEphemeralAuthClient } from '@/lib/supabase';
+import { toastSuccess, toastError } from '@/lib/notify';
+import { askConfirm } from '@/lib/confirmDialog';
 import { Card, CardContent } from '@/components/ui/card';
+import { AccessDenied } from '@/components/layout/AccessDenied';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -18,6 +21,12 @@ import {
 import { adminSetUserEmail, adminSetUserPassword } from '@/lib/adminPassword';
 import { useAuthStore } from '@/store/authStore';
 import { effectiveAppRole, PRIMARY_ADMIN_EMAIL, SUPER_ADMIN_EMAIL } from '@/lib/roles';
+import {
+  ADMIN_PERMISSION_KEYS,
+  ALL_PERMISSIONS_TRUE,
+  countGranted,
+  normalizePermissions,
+} from '@/lib/permissions';
 import { relationOne } from '@/features/teacher/utils/teacherData';
 
 type AdminRow = {
@@ -28,18 +37,6 @@ type AdminRow = {
   status: string | null;
   permissions: Record<string, boolean> | null;
 };
-
-const PERMISSION_KEYS: { key: string; label: string }[] = [
-  { key: 'can_approve_users', label: 'Approve / Reject Users' },
-  { key: 'can_manage_teachers', label: 'Manage Teachers' },
-  { key: 'can_manage_students', label: 'Manage Students' },
-  { key: 'can_manage_courses', label: 'Manage Courses' },
-  { key: 'can_assign_teachers', label: 'Assign Teachers to Courses' },
-  { key: 'can_view_reports', label: 'View Reports' },
-  { key: 'can_export_pdf', label: 'Export PDF Reports' },
-  { key: 'can_reset_passwords', label: 'Reset User Passwords' },
-  { key: 'can_view_submissions', label: 'View All Submissions' },
-];
 
 const emptyAdd = { full_name: '', email: '', phone: '', password: '', confirmPassword: '' };
 const emptyEdit = { full_name: '', email: '', phone: '', status: 'Approved' };
@@ -54,7 +51,6 @@ export default function ManageAdminsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Approved' | 'Suspended' | 'Pending'>('All');
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [showAdd, setShowAdd] = useState(false);
@@ -80,7 +76,7 @@ export default function ManageAdminsPage() {
 
     if (error) {
       setAdmins([]);
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Something went wrong.');
     } else {
       const list = ((data ?? []) as Array<Record<string, unknown>>)
         .map((row) => {
@@ -129,10 +125,10 @@ export default function ManageAdminsPage() {
 
   if (!isSuperAdmin) {
     return (
-      <div className="p-8 text-center">
-        <h1 className="text-2xl font-bold">Access denied</h1>
-        <p className="text-muted-foreground mt-2">Only Super Admin can manage Admin accounts.</p>
-      </div>
+      <AccessDenied
+        title="Access denied"
+        message="Only Super Admin can manage Admin accounts."
+      />
     );
   }
 
@@ -148,7 +144,6 @@ export default function ManageAdminsPage() {
 
   const handleAddAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage(null);
 
     const full_name = addForm.full_name.trim();
     const email = addForm.email.trim().toLowerCase();
@@ -156,27 +151,27 @@ export default function ManageAdminsPage() {
     const password = addForm.password;
 
     if (!full_name || !email) {
-      setMessage({ type: 'error', text: 'Name and email are required.' });
+      toastError('Name and email are required.');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setMessage({ type: 'error', text: 'Enter a valid email address.' });
+      toastError('Enter a valid email address.');
       return;
     }
     if (email === SUPER_ADMIN_EMAIL) {
-      setMessage({ type: 'error', text: 'This email is reserved for Super Admin.' });
+      toastError('This email is reserved for Super Admin.');
       return;
     }
     if (password.length < 6) {
-      setMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
+      toastError('Password must be at least 6 characters.');
       return;
     }
     if (password !== addForm.confirmPassword) {
-      setMessage({ type: 'error', text: 'Password and Confirm Password do not match.' });
+      toastError('Password and Confirm Password do not match.');
       return;
     }
     if (!adminRoleId) {
-      setMessage({ type: 'error', text: 'Admin role not found in database.' });
+      toastError('Admin role not found.');
       return;
     }
 
@@ -217,7 +212,7 @@ export default function ManageAdminsPage() {
         phone: phone || null,
         role_id: adminRoleId,
         status: 'Approved' as const,
-        permissions: Object.fromEntries(PERMISSION_KEYS.map((p) => [p.key, true])),
+        permissions: { ...ALL_PERMISSIONS_TRUE },
       };
 
       if (existingProfile?.[0]) {
@@ -228,18 +223,12 @@ export default function ManageAdminsPage() {
         if (error) throw new Error(error.message);
       }
 
-      setMessage({
-        type: 'success',
-        text: `Admin "${full_name}" created. Login: ${email}`,
-      });
+      toastSuccess('Admin added.');
       setAddForm(emptyAdd);
       setShowAdd(false);
       await fetchAdmins();
     } catch (err: unknown) {
-      setMessage({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to create admin.',
-      });
+      toastError(err, 'Failed to create admin.');
     } finally {
       setSaving(false);
     }
@@ -247,22 +236,21 @@ export default function ManageAdminsPage() {
 
   const handleSaveEdit = async () => {
     if (!editing) return;
-    setMessage(null);
 
     const full_name = editForm.full_name.trim();
     const email = editForm.email.trim().toLowerCase();
     const phone = editForm.phone.trim();
 
     if (!full_name || !email) {
-      setMessage({ type: 'error', text: 'Name and email are required.' });
+      toastError('Name and email are required.');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setMessage({ type: 'error', text: 'Enter a valid email address.' });
+      toastError('Enter a valid email address.');
       return;
     }
     if (email === SUPER_ADMIN_EMAIL) {
-      setMessage({ type: 'error', text: 'This email is reserved for Super Admin.' });
+      toastError('This email is reserved for Super Admin.');
       return;
     }
 
@@ -281,7 +269,7 @@ export default function ManageAdminsPage() {
       .eq('id', editing.id);
 
     if (error) {
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Something went wrong.');
       setSaving(false);
       return;
     }
@@ -290,20 +278,14 @@ export default function ManageAdminsPage() {
       try {
         await adminSetUserEmail(editing.id, email);
       } catch (err: unknown) {
-        setMessage({
-          type: 'error',
-          text:
-            err instanceof Error
-              ? err.message
-              : 'Profile saved, but login email update failed. Redeploy admin-set-password.',
-        });
+        toastError(err, 'Email update failed.');
         setSaving(false);
         await fetchAdmins();
         return;
       }
     }
 
-    setMessage({ type: 'success', text: 'Admin updated successfully.' });
+    toastSuccess('Admin updated.');
     setEditing(null);
     setSaving(false);
     await fetchAdmins();
@@ -311,33 +293,44 @@ export default function ManageAdminsPage() {
 
   const setStatus = async (admin: AdminRow, status: 'Approved' | 'Suspended' | 'Pending') => {
     if (admin.id === user?.id) {
-      setMessage({ type: 'error', text: 'You cannot change your own status here.' });
+      toastError("Can't change your own status.");
       return;
     }
     if (admin.status === status) return;
-    if (!confirm(`Set ${admin.full_name || admin.email} to ${status}?`)) return;
+    const ok = await askConfirm({
+      title: 'Change admin status?',
+      description: `Are you sure you want to set "${admin.full_name || admin.email}" to ${status}?`,
+      confirmLabel: `Yes, set ${status}`,
+      cancelLabel: 'Cancel',
+      tone: status === 'Approved' ? 'default' : 'warning',
+    });
+    if (!ok) return;
 
     const { error } = await supabase.from('profiles').update({ status }).eq('id', admin.id);
     if (error) {
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Something went wrong.');
       return;
     }
-    setMessage({ type: 'success', text: `Admin status set to ${status}.` });
+    toastSuccess(`Admin status set to ${status}.`);
     await fetchAdmins();
   };
 
   const removeAdmin = async (admin: AdminRow) => {
     if (admin.id === user?.id) {
-      setMessage({ type: 'error', text: 'You cannot remove your own account.' });
+      toastError("Can't remove your own account.");
       return;
     }
     const email = (admin.email || '').toLowerCase();
     const isPrimary = email === PRIMARY_ADMIN_EMAIL;
-    const ok = confirm(
-      isPrimary
-        ? `Remove PRIMARY admin "${admin.full_name}" (${admin.email})?\n\nThis suspends the account. Auth login may still exist.`
-        : `Remove admin "${admin.full_name}"?\n\nThis suspends the account. Auth login may still exist.`,
-    );
+    const ok = await askConfirm({
+      title: isPrimary ? 'Remove PRIMARY admin?' : 'Remove admin?',
+      description: isPrimary
+        ? `Are you sure you want to remove PRIMARY admin "${admin.full_name}" (${admin.email})?\n\nThis suspends the account. Auth login may still exist.`
+        : `Are you sure you want to remove "${admin.full_name}"?\n\nThis suspends the account. Auth login may still exist.`,
+      confirmLabel: 'Yes, remove admin',
+      cancelLabel: 'Cancel',
+      tone: 'danger',
+    });
     if (!ok) return;
 
     const { error } = await supabase
@@ -346,10 +339,10 @@ export default function ManageAdminsPage() {
       .eq('id', admin.id);
 
     if (error) {
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Something went wrong.');
       return;
     }
-    setMessage({ type: 'success', text: 'Admin removed (account suspended).' });
+    toastSuccess('Admin removed.');
     await fetchAdmins();
   };
 
@@ -358,12 +351,15 @@ export default function ManageAdminsPage() {
     setSaving(true);
     const { error } = await supabase
       .from('profiles')
-      .update({ permissions: perms })
+      .update({
+        permissions: perms,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', permsAdmin.id);
     if (error) {
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Something went wrong.');
     } else {
-      setMessage({ type: 'success', text: `Permissions saved for ${permsAdmin.full_name}.` });
+      toastSuccess('Permissions saved. That admin will be asked to login again.');
       setPermsAdmin(null);
       await fetchAdmins();
     }
@@ -373,25 +369,22 @@ export default function ManageAdminsPage() {
   const handleResetPassword = async () => {
     if (!resetAdmin) return;
     if (newPassword.length < 6) {
-      setMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
+      toastError('Password must be at least 6 characters.');
       return;
     }
     if (newPassword !== confirmPassword) {
-      setMessage({ type: 'error', text: 'Passwords do not match.' });
+      toastError('Passwords do not match.');
       return;
     }
     setSaving(true);
     try {
       await adminSetUserPassword(resetAdmin.id, newPassword);
-      setMessage({ type: 'success', text: `Password reset for ${resetAdmin.full_name}.` });
+      toastSuccess('Password updated.');
       setResetAdmin(null);
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: unknown) {
-      setMessage({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Password reset failed.',
-      });
+      toastError(err, 'Password reset failed.');
     } finally {
       setSaving(false);
     }
@@ -421,18 +414,6 @@ export default function ManageAdminsPage() {
           <Plus className="w-4 h-4" /> Add Admin
         </Button>
       </div>
-
-      {message ? (
-        <div
-          className={`rounded-md border px-4 py-3 text-sm ${
-            message.type === 'success'
-              ? 'border-green-200 bg-green-50 text-green-800 dark:border-green-900/40 dark:bg-green-950/30 dark:text-green-300'
-              : 'border-destructive/30 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {message.text}
-        </div>
-      ) : null}
 
       <Card>
         <CardContent className="p-4 space-y-4">
@@ -484,7 +465,7 @@ export default function ManageAdminsPage() {
                   </tr>
                 ) : (
                   filtered.map((admin) => {
-                    const granted = Object.values(admin.permissions ?? {}).filter(Boolean).length;
+                    const granted = countGranted(admin.permissions);
                     const isPrimary = (admin.email || '').toLowerCase() === PRIMARY_ADMIN_EMAIL;
                     return (
                       <tr key={admin.id} className="border-b hover:bg-muted/30 transition-colors">
@@ -526,7 +507,7 @@ export default function ManageAdminsPage() {
                           </span>
                         </td>
                         <td className="px-4 py-4 text-xs text-muted-foreground">
-                          {granted}/{PERMISSION_KEYS.length} granted
+                          {granted}/{ADMIN_PERMISSION_KEYS.length} granted
                         </td>
                         <td className="px-4 py-4 text-right">
                           <div className="flex flex-wrap items-center justify-end gap-1">
@@ -546,7 +527,7 @@ export default function ManageAdminsPage() {
                               title="Permissions"
                               onClick={() => {
                                 setPermsAdmin(admin);
-                                setPerms(admin.permissions ?? {});
+                                setPerms(normalizePermissions(admin.permissions) as Record<string, boolean>);
                               }}
                             >
                               <Settings2 className="w-4 h-4" />
@@ -740,30 +721,57 @@ export default function ManageAdminsPage() {
       {/* Permissions */}
       {permsAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <Card className="w-full max-w-md border-none shadow-lg">
+          <Card className="w-full max-w-lg border-none shadow-lg">
             <CardContent className="space-y-4 p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-xl font-bold">Permissions</h2>
-                  <p className="text-sm text-muted-foreground mt-1">{permsAdmin.full_name}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {permsAdmin.full_name} · controls what this admin can access
+                  </p>
                 </div>
                 <Button variant="ghost" size="icon" onClick={() => setPermsAdmin(null)}>
                   <X className="w-4 h-4" />
                 </Button>
               </div>
-              <div className="max-h-80 space-y-2 overflow-y-auto">
-                {PERMISSION_KEYS.map(({ key, label }) => (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPerms({ ...ALL_PERMISSIONS_TRUE })}
+                >
+                  Grant all
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setPerms(
+                      Object.fromEntries(ADMIN_PERMISSION_KEYS.map((p) => [p.key, false])),
+                    )
+                  }
+                >
+                  Revoke all
+                </Button>
+              </div>
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {ADMIN_PERMISSION_KEYS.map(({ key, label, hint }) => (
                   <label
                     key={key}
-                    className="flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2"
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition hover:bg-muted/40"
                   >
                     <input
                       type="checkbox"
-                      className="h-4 w-4"
+                      className="mt-1 h-4 w-4"
                       checked={!!perms[key]}
                       onChange={(e) => setPerms((p) => ({ ...p, [key]: e.target.checked }))}
                     />
-                    <span className="text-sm font-medium">{label}</span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium">{label}</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
+                    </span>
                   </label>
                 ))}
               </div>

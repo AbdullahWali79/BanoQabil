@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, createEphemeralAuthClient } from '@/lib/supabase';
+import { toastSuccess, toastError } from '@/lib/notify';
+import { askConfirm } from '@/lib/confirmDialog';
+import { usePermission } from '@/hooks/usePermission';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -15,6 +18,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  Eye,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { ensureStudentRow, relationOne } from '@/features/teacher/utils/teacherData';
@@ -83,15 +87,17 @@ function cleanBatchLabel(name: string) {
 }
 
 export default function ManageStudentsPage() {
+  const { can: canPerm, denyMessage } = usePermission();
+  const canResetPasswords = canPerm('can_reset_passwords');
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [batches, setBatches] = useState<{ id: string; name: string }[]>([]);
   const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<StudentRow | null>(null);
+  const [viewing, setViewing] = useState<StudentRow | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState<StudentForm>(emptyForm);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [studentRoleId, setStudentRoleId] = useState<string | null>(null);
@@ -117,13 +123,11 @@ export default function ManageStudentsPage() {
 
   const handleAutoGenerateAppId = async () => {
     setGeneratingAppId(true);
-    setMessage(null);
     try {
       const appId = await generateUniqueApplicationId();
       setField('application_id', appId);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to generate Application ID';
-      setMessage({ type: 'error', text: msg });
+      toastError(err, 'Could not generate ID.');
     } finally {
       setGeneratingAppId(false);
     }
@@ -146,7 +150,7 @@ export default function ManageStudentsPage() {
     ]);
 
     if (error) {
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Something went wrong.');
       setStudents([]);
     } else {
       setStudents((data as StudentRow[]) ?? []);
@@ -286,6 +290,10 @@ export default function ManageStudentsPage() {
   };
 
   const openResetPassword = (student: StudentRow) => {
+    if (!canResetPasswords) {
+      toastError(denyMessage('can_reset_passwords'));
+      return;
+    }
     setResetTarget(student);
     setResetPassword('');
     setResetConfirm('');
@@ -297,30 +305,21 @@ export default function ManageStudentsPage() {
     if (!profile?.id) return;
 
     if (resetPassword.length < 6) {
-      setMessage({ type: 'error', text: 'New password must be at least 6 characters.' });
+      toastError('New password must be at least 6 characters.');
       return;
     }
     if (resetPassword !== resetConfirm) {
-      setMessage({ type: 'error', text: 'Password and Confirm Password do not match.' });
+      toastError('Password and Confirm Password do not match.');
       return;
     }
 
     setResetting(true);
-    setMessage(null);
     try {
       await adminSetUserPassword(profile.id, resetPassword);
-      setMessage({
-        type: 'success',
-        text: `Password updated for ${profile.full_name}.`,
-      });
+      toastSuccess('Password updated.');
       setResetTarget(null);
-    } catch (err: any) {
-      setMessage({
-        type: 'error',
-        text:
-          err?.message ||
-          'Direct password reset failed. Deploy edge function admin-set-password.',
-      });
+    } catch (err: unknown) {
+      toastError(err, 'Password update failed.');
     } finally {
       setResetting(false);
     }
@@ -329,31 +328,30 @@ export default function ManageStudentsPage() {
   const saveEdit = async () => {
     if (!editing) return;
     if (!form.full_name.trim() || !form.email.trim()) {
-      setMessage({ type: 'error', text: 'Name and email are required.' });
+      toastError('Name and email are required.');
       return;
     }
     if (!form.application_id.trim()) {
-      setMessage({ type: 'error', text: 'Application ID is required.' });
+      toastError('Application ID is required.');
       return;
     }
     const formatErr = validateApplicationIdFormat(form.application_id);
     if (formatErr) {
-      setMessage({ type: 'error', text: formatErr });
+      toastError(formatErr);
       return;
     }
     const newEmail = form.email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
-      setMessage({ type: 'error', text: 'Enter a valid email address.' });
+      toastError('Enter a valid email address.');
       return;
     }
 
     setSaving(true);
-    setMessage(null);
 
     const profile = relationOne(editing.profiles);
     const profileId = profile?.id;
     if (!profileId) {
-      setMessage({ type: 'error', text: 'Student profile missing.' });
+      toastError('Student profile missing.');
       setSaving(false);
       return;
     }
@@ -361,10 +359,7 @@ export default function ManageStudentsPage() {
     const appId = form.application_id.trim();
     const taken = await isApplicationIdTaken(appId, editing.id);
     if (taken) {
-      setMessage({
-        type: 'error',
-        text: `Application ID "${appId}" is already used by another student.`,
-      });
+      toastError('Application ID already in use.');
       setSaving(false);
       return;
     }
@@ -377,11 +372,7 @@ export default function ManageStudentsPage() {
       try {
         await adminSetUserEmail(profileId, newEmail);
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Email update failed';
-        setMessage({
-          type: 'error',
-          text: `${msg} Redeploy edge function admin-set-password if needed.`,
-        });
+        toastError(err, 'Email update failed.');
         setSaving(false);
         return;
       }
@@ -411,22 +402,16 @@ export default function ManageStudentsPage() {
 
     if (profileError || studentError) {
       const raw = profileError?.message || studentError?.message || 'Update failed';
-      setMessage({
-        type: 'error',
-        text: /unique|duplicate/i.test(raw)
-          ? `Application ID "${appId}" must be unique.`
-          : raw,
-      });
+      if (/unique|duplicate/i.test(raw)) {
+        toastError('Application ID already in use.');
+      } else {
+        toastError(profileError || studentError, 'Update failed');
+      }
       setSaving(false);
       return;
     }
 
-    setMessage({
-      type: 'success',
-      text: emailChanged
-        ? `Student updated. Login email is now ${newEmail}.`
-        : 'Student updated successfully.',
-    });
+    toastSuccess('Student updated.');
     setEditing(null);
     setSaving(false);
     await fetchStudents();
@@ -434,33 +419,29 @@ export default function ManageStudentsPage() {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage(null);
 
     if (!form.full_name.trim() || !form.email.trim()) {
-      setMessage({ type: 'error', text: 'Name and email are required.' });
+      toastError('Name and email are required.');
       return;
     }
     if (!form.application_id.trim()) {
-      setMessage({ type: 'error', text: 'Application ID is required.' });
+      toastError('Application ID is required.');
       return;
     }
     const formatErr = validateApplicationIdFormat(form.application_id);
     if (formatErr) {
-      setMessage({ type: 'error', text: formatErr });
+      toastError(formatErr);
       return;
     }
     if (!studentRoleId) {
-      setMessage({ type: 'error', text: 'Student role not found.' });
+      toastError('Student role not found.');
       return;
     }
 
     const appId = form.application_id.trim();
     const taken = await isApplicationIdTaken(appId);
     if (taken) {
-      setMessage({
-        type: 'error',
-        text: `Application ID "${appId}" is already used. Enter another or click Auto Generate.`,
-      });
+      toastError('Application ID already in use.');
       return;
     }
 
@@ -469,14 +450,11 @@ export default function ManageStudentsPage() {
       : form.password.trim();
 
     if (password.length < 6) {
-      setMessage({
-        type: 'error',
-        text: 'Password must be at least 6 characters.',
-      });
+      toastError('Password must be at least 6 characters.');
       return;
     }
     if (!useAppIdAsPassword && password !== form.confirmPassword.trim()) {
-      setMessage({ type: 'error', text: 'Password and Confirm Password do not match.' });
+      toastError('Password and Confirm Password do not match.');
       return;
     }
 
@@ -548,17 +526,14 @@ export default function ManageStudentsPage() {
         );
       }
 
-      setMessage({
-        type: 'success',
-        text: useAppIdAsPassword
-          ? `Student "${form.full_name.trim()}" added. Login: ${form.email.trim()} · Password = Application ID`
-          : `Student "${form.full_name.trim()}" added. Login: ${form.email.trim()} (password set by admin).`,
-      });
+      toastSuccess(
+        (form.status || 'Approved') === 'Pending' ? 'Student added (pending).' : 'Student added.',
+      );
       setShowAdd(false);
       setForm(emptyForm);
       await fetchStudents();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err?.message || 'Failed to add student.' });
+      toastError(err, 'Failed to add student.');
     } finally {
       setSaving(false);
     }
@@ -566,32 +541,32 @@ export default function ManageStudentsPage() {
 
   const removeStudent = async (student: StudentRow) => {
     const p = relationOne(student.profiles);
-    if (
-      !confirm(
-        `Remove student "${p?.full_name}"?\n\nThis removes their student record and suspends the account. Auth login may still exist.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await askConfirm({
+      title: 'Delete student record?',
+      description: `Are you sure you want to remove "${p?.full_name || 'this student'}"?\n\nThis deletes their student record and suspends the account. Auth login may still exist.`,
+      confirmLabel: 'Yes, delete student',
+      cancelLabel: 'Cancel',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     const { error: delError } = await supabase.from('students').delete().eq('id', student.id);
     if (delError) {
-      setMessage({ type: 'error', text: delError.message });
+      toastError(delError, 'Something went wrong.');
       return;
     }
     if (p?.id) {
       await supabase.from('profiles').update({ status: 'Suspended' }).eq('id', p.id);
     }
-    setMessage({ type: 'success', text: 'Student removed and account suspended.' });
+    toastSuccess('Student removed.');
     await fetchStudents();
   };
 
   const syncMissingRows = async () => {
     setSyncing(true);
-    setMessage(null);
     try {
       if (!studentRoleId) {
-        setMessage({ type: 'error', text: 'Student role not found.' });
+        toastError('Student role not found.');
         setSyncing(false);
         return;
       }
@@ -604,13 +579,10 @@ export default function ManageStudentsPage() {
       for (const profile of profiles ?? []) {
         await ensureStudentRow(profile.id);
       }
-      setMessage({ type: 'success', text: 'Synced student records from approved profiles.' });
+      toastSuccess('Students synced.');
       await fetchStudents();
-    } catch (err: any) {
-      setMessage({
-        type: 'error',
-        text: err?.message || 'Sync failed (check RLS insert policy on students).',
-      });
+    } catch (err: unknown) {
+      toastError(err, 'Sync failed.');
     } finally {
       setSyncing(false);
     }
@@ -861,18 +833,6 @@ export default function ManageStudentsPage() {
         </Card>
       </div>
 
-      {message && (
-        <div
-          className={`rounded-md border px-4 py-3 text-sm ${
-            message.type === 'success'
-              ? 'border-green-300 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-900/20 dark:text-green-300'
-              : 'border-destructive/40 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
       <Card className="shadow-sm overflow-hidden">
         <CardContent className="p-0">
           <div className="p-4 border-b space-y-3 bg-muted/20">
@@ -1019,6 +979,15 @@ export default function ManageStudentsPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
+                              title="View details"
+                              onClick={() => setViewing(s)}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
                               title="Edit"
                               onClick={() => openEdit(s)}
                             >
@@ -1029,6 +998,7 @@ export default function ManageStudentsPage() {
                               size="icon"
                               className="h-8 w-8"
                               title="Reset Password"
+                              disabled={!canResetPasswords}
                               onClick={() => openResetPassword(s)}
                             >
                               <KeyRound className="w-4 h-4" />
@@ -1086,6 +1056,100 @@ export default function ManageStudentsPage() {
           )}
         </CardContent>
       </Card>
+
+      {viewing && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-2xl shadow-lg border-none max-h-[90vh] overflow-y-auto">
+            <CardContent className="p-6 space-y-5">
+              {(() => {
+                const profile = relationOne(viewing.profiles);
+                const batch = relationOne(viewing.batches);
+                const course = relationOne(viewing.courses);
+                return (
+                  <>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h2 className="text-xl font-bold">Student Details</h2>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {profile?.full_name || '—'}
+                        </p>
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={() => setViewing(null)}>
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                          profile?.status === 'Approved'
+                            ? 'bg-green-100 text-green-800'
+                            : profile?.status === 'Suspended'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {profile?.status || '—'}
+                      </span>
+                      {viewing.gender === 'Female' ? (
+                        <span className="inline-flex rounded-md bg-pink-100 px-2 py-0.5 text-xs font-semibold text-pink-800">
+                          Female
+                        </span>
+                      ) : viewing.gender === 'Male' ? (
+                        <span className="inline-flex rounded-md bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-800">
+                          Male
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2 text-sm">
+                      {(
+                        [
+                          ['Application ID', viewing.application_id || '—'],
+                          ['Email', profile?.email || '—'],
+                          ['Phone', profile?.phone || '—'],
+                          ['Father Name', viewing.father_name || '—'],
+                          ['Gender', viewing.gender || '—'],
+                          ['Course', course?.name || 'Unassigned'],
+                          ['Batch', batch ? cleanBatchLabel(batch.name) : 'Unassigned'],
+                          [
+                            'Enrollment',
+                            viewing.enrollment_date
+                              ? new Date(viewing.enrollment_date).toLocaleDateString()
+                              : '—',
+                          ],
+                        ] as const
+                      ).map(([label, value]) => (
+                        <div key={label} className="rounded-md border bg-muted/20 px-3 py-2">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                            {label}
+                          </p>
+                          <p className="mt-0.5 font-medium break-all">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap justify-end gap-2 pt-1">
+                      <Button variant="outline" onClick={() => setViewing(null)}>
+                        Close
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          const s = viewing;
+                          setViewing(null);
+                          openEdit(s);
+                        }}
+                      >
+                        Edit Student
+                      </Button>
+                    </div>
+                  </>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {editing && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">

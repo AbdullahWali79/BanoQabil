@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
+import { toastError, toastSuccess } from '@/lib/notify';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -32,13 +33,11 @@ export default function GradeSubmissionsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [forbidden, setForbidden] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     async function load() {
       if (!assignmentId || !user?.id) return;
       setLoading(true);
-      setMessage(null);
       setForbidden(false);
 
       const entityId = await getTeacherEntityId(user.id);
@@ -54,7 +53,7 @@ export default function GradeSubmissionsPage() {
 
       const assignment = assignmentRows?.[0];
       if (assignmentError || !assignment) {
-        setMessage({ type: 'error', text: assignmentError?.message || 'Assignment not found.' });
+        toastError(assignmentError, 'Assignment not found.');
         setRows([]);
         setLoading(false);
         return;
@@ -66,10 +65,7 @@ export default function GradeSubmissionsPage() {
 
       if (!ownsByTeacher && !ownsByBatch) {
         setForbidden(true);
-        setMessage({
-          type: 'error',
-          text: 'You can only grade submissions for assignments in your own course/class.',
-        });
+        toastError('Not your assignment.');
         setRows([]);
         setLoading(false);
         return;
@@ -100,7 +96,7 @@ export default function GradeSubmissionsPage() {
         .order('submitted_at', { ascending: false });
 
       if (error) {
-        setMessage({ type: 'error', text: error.message });
+        toastError(error, 'Failed to load submissions.');
         setRows([]);
       } else {
         setRows(
@@ -138,7 +134,6 @@ export default function GradeSubmissionsPage() {
   const handleSaveAll = async () => {
     if (forbidden) return;
     setSaving(true);
-    setMessage(null);
 
     try {
       for (const row of rows) {
@@ -159,15 +154,9 @@ export default function GradeSubmissionsPage() {
 
         if (error) throw error;
       }
-      setMessage({
-        type: 'success',
-        text: 'Marks saved. Students can now see their scores on My Grades.',
-      });
+      toastSuccess('Marks saved.');
     } catch (err: unknown) {
-      setMessage({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to save grades.',
-      });
+      toastError(err, 'Failed to save grades.');
     } finally {
       setSaving(false);
     }
@@ -187,18 +176,6 @@ export default function GradeSubmissionsPage() {
           <Link to="/dashboard/assignments">Back to Assignments</Link>
         </Button>
       </div>
-
-      {message && (
-        <div
-          className={`rounded-md px-4 py-3 text-sm ${
-            message.type === 'success'
-              ? 'border border-green-300 bg-green-50 text-green-700'
-              : 'border border-destructive/40 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
 
       {forbidden ? null : (
         <>

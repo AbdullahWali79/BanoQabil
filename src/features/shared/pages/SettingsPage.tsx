@@ -5,9 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
+import { toastError, toastSuccess } from '@/lib/notify';
 import {
-  AlertCircle,
-  CheckCircle2,
   Eye,
   EyeOff,
   KeyRound,
@@ -18,30 +17,6 @@ import {
   Shield,
   User,
 } from 'lucide-react';
-
-type Feedback = { type: 'success' | 'error'; text: string } | null;
-
-function MessageBanner({ message }: { message: Feedback }) {
-  if (!message) return null;
-  const ok = message.type === 'success';
-  return (
-    <div
-      className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${
-        ok
-          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-          : 'border-red-200 bg-red-50 text-red-800'
-      }`}
-      role="status"
-    >
-      {ok ? (
-        <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
-      ) : (
-        <AlertCircle size={16} className="mt-0.5 shrink-0" />
-      )}
-      <span>{message.text}</span>
-    </div>
-  );
-}
 
 function PasswordField({
   id,
@@ -101,13 +76,11 @@ export default function SettingsPage() {
   const [email, setEmail] = useState('');
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
-  const [profileMessage, setProfileMessage] = useState<Feedback>(null);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
-  const [passwordMessage, setPasswordMessage] = useState<Feedback>(null);
 
   useEffect(() => {
     if (!user?.id) {
@@ -145,12 +118,11 @@ export default function SettingsPage() {
 
     const trimmedName = fullName.trim();
     if (!trimmedName) {
-      setProfileMessage({ type: 'error', text: 'Full name is required.' });
+      toastError('Full name is required.');
       return;
     }
 
     setSavingProfile(true);
-    setProfileMessage(null);
 
     const [{ error: profileError }, { data: authData, error: authError }] = await Promise.all([
       supabase
@@ -167,14 +139,10 @@ export default function SettingsPage() {
     ]);
 
     if (profileError || authError) {
-      setProfileMessage({
-        type: 'error',
-        text: profileError?.message || authError?.message || 'Could not update profile.',
-      });
+      toastError(profileError || authError, 'Profile update failed.');
     } else {
       if (authData.user) setUser(authData.user);
-      setProfileMessage({ type: 'success', text: 'Profile updated successfully.' });
-      setTimeout(() => setProfileMessage(null), 3000);
+      toastSuccess('Profile updated.');
     }
 
     setSavingProfile(false);
@@ -183,41 +151,36 @@ export default function SettingsPage() {
   const handleUpdatePassword = async (e: FormEvent) => {
     e.preventDefault();
     if (!user?.email) {
-      setPasswordMessage({ type: 'error', text: 'No email on this account. Cannot change password.' });
+      toastError('No email on account.');
       return;
     }
 
     if (!currentPassword) {
-      setPasswordMessage({ type: 'error', text: 'Enter your current password first.' });
+      toastError('Enter your current password first.');
       return;
     }
     if (!newPassword || newPassword.length < 8) {
-      setPasswordMessage({ type: 'error', text: 'New password must be at least 8 characters.' });
+      toastError('New password must be at least 8 characters.');
       return;
     }
     if (newPassword === currentPassword) {
-      setPasswordMessage({
-        type: 'error',
-        text: 'New password must be different from the current password.',
-      });
+      toastError('Use a different password.');
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordMessage({ type: 'error', text: 'New password and confirmation do not match.' });
+      toastError('Passwords do not match.');
       return;
     }
 
     setSavingPassword(true);
-    setPasswordMessage(null);
 
-    // Re-authenticate to verify the current password before allowing a change
     const { error: verifyError } = await supabase.auth.signInWithPassword({
       email: user.email,
       password: currentPassword,
     });
 
     if (verifyError) {
-      setPasswordMessage({ type: 'error', text: 'Current password is incorrect.' });
+      toastError('Current password is incorrect.');
       setSavingPassword(false);
       return;
     }
@@ -225,13 +188,12 @@ export default function SettingsPage() {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
 
     if (error) {
-      setPasswordMessage({ type: 'error', text: error.message });
+      toastError(error, 'Password update failed.');
     } else {
-      setPasswordMessage({ type: 'success', text: 'Password updated successfully.' });
+      toastSuccess('Password updated.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setTimeout(() => setPasswordMessage(null), 3000);
     }
 
     setSavingPassword(false);
@@ -337,8 +299,6 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                <MessageBanner message={profileMessage} />
-
                 <Button type="submit" disabled={savingProfile} className="w-full sm:w-auto">
                   {savingProfile ? (
                     <>
@@ -397,8 +357,6 @@ export default function SettingsPage() {
                 Use at least 8 characters. New password must match confirmation and differ from the
                 current one.
               </p>
-
-              <MessageBanner message={passwordMessage} />
 
               <Button
                 type="submit"

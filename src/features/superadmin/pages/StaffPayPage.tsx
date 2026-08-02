@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { toastSuccess, toastError } from '@/lib/notify';
+import { askConfirm } from '@/lib/confirmDialog';
 import { useAuthStore } from '@/store/authStore';
 import { effectiveAppRole, SUPER_ADMIN_EMAIL } from '@/lib/roles';
 import { relationOne } from '@/features/teacher/utils/teacherData';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
+import { AccessDenied } from '@/components/layout/AccessDenied';
 import {
   Banknote,
   CheckCircle2,
@@ -100,9 +103,6 @@ export default function StaffPayPage() {
   const [search, setSearch] = useState('');
   const [kindFilter, setKindFilter] = useState<'All' | StaffKind>('All');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Paid' | 'Pending'>('All');
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
-    null,
-  );
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   const [showAddStaff, setShowAddStaff] = useState(false);
@@ -120,7 +120,6 @@ export default function StaffPayPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    setMessage(null);
     try {
       const [{ data: profiles, error: profileError }, { data: otherStaff, error: staffError }, { data: pays, error: payError }] =
         await Promise.all([
@@ -208,13 +207,7 @@ export default function StaffPayPage() {
     } catch (err: unknown) {
       setPeople([]);
       setAllPayHistory([]);
-      setMessage({
-        type: 'error',
-        text:
-          err instanceof Error
-            ? err.message
-            : 'Failed to load staff pay. Run sql/schema/staff_pay_schema.sql in Supabase.',
-      });
+      toastError(err, 'Failed to load staff pay.');
     } finally {
       setLoading(false);
     }
@@ -296,7 +289,6 @@ export default function StaffPayPage() {
     const targetYear = next.year ?? year;
     const targetMonth = next.month ?? month;
     setSavingKey(person.key);
-    setMessage(null);
     try {
       const existing = allPayHistory.find((row) => {
         if (row.year !== targetYear || row.month !== targetMonth) return false;
@@ -328,20 +320,11 @@ export default function StaffPayPage() {
         if (error) throw new Error(error.message);
       }
 
-      setMessage({
-        type: 'success',
-        text:
-          next.status === 'Paid'
-            ? `Paid ${person.name} — ${monthLabel(targetYear, targetMonth)} (Rs ${next.amount.toLocaleString()})`
-            : `Pending: ${person.name} — ${monthLabel(targetYear, targetMonth)}`,
-      });
+      toastSuccess(next.status === 'Paid' ? 'Payment saved.' : 'Marked as pending.');
       setPayModal(null);
       await loadData();
     } catch (err: unknown) {
-      setMessage({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to update pay.',
-      });
+      toastError(err, 'Failed to update pay.');
     } finally {
       setSavingKey(null);
     }
@@ -362,7 +345,7 @@ export default function StaffPayPage() {
     if (!payModal) return;
     const amount = Number(payModal.amount);
     if (Number.isNaN(amount) || amount < 0) {
-      setMessage({ type: 'error', text: 'Enter a valid amount.' });
+      toastError('Enter a valid amount.');
       return;
     }
     await upsertPay(payModal.person, {
@@ -375,7 +358,7 @@ export default function StaffPayPage() {
   const saveAmount = async (person: PayPerson, amountStr: string) => {
     const amount = Number(amountStr);
     if (Number.isNaN(amount) || amount < 0) {
-      setMessage({ type: 'error', text: 'Enter a valid amount.' });
+      toastError('Enter a valid amount.');
       return;
     }
     const existing = payByKey.get(person.key);
@@ -410,11 +393,10 @@ export default function StaffPayPage() {
     const full_name = staffForm.full_name.trim();
     const job_title = staffForm.job_title.trim() || 'Staff';
     if (!full_name) {
-      setMessage({ type: 'error', text: 'Name is required.' });
+      toastError('Name is required.');
       return;
     }
     setStaffSaving(true);
-    setMessage(null);
     try {
       const payload = {
         full_name,
@@ -438,21 +420,18 @@ export default function StaffPayPage() {
           .update(payload)
           .eq('id', editingStaff.staffMemberId);
         if (error) throw new Error(error.message);
-        setMessage({ type: 'success', text: 'Staff updated.' });
+        toastSuccess('Staff updated.');
       } else {
         const { error } = await supabase.from('staff_members').insert(payload);
         if (error) throw new Error(error.message);
-        setMessage({ type: 'success', text: 'Staff added.' });
+        toastSuccess('Staff added.');
       }
       setShowAddStaff(false);
       setEditingStaff(null);
       setStaffForm(emptyOtherForm);
       await loadData();
     } catch (err: unknown) {
-      setMessage({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to save staff.',
-      });
+      toastError(err, 'Failed to save staff.');
     } finally {
       setStaffSaving(false);
     }
@@ -460,25 +439,32 @@ export default function StaffPayPage() {
 
   const deactivateStaff = async (person: PayPerson) => {
     if (person.kind !== 'Other' || !person.staffMemberId) return;
-    if (!confirm(`Remove "${person.name}" from other staff list?`)) return;
+    const ok = await askConfirm({
+      title: 'Remove staff member?',
+      description: `Are you sure you want to remove "${person.name}" from the other staff list?\n\nThey will be marked inactive and hidden from payroll.`,
+      confirmLabel: 'Yes, remove staff',
+      cancelLabel: 'Cancel',
+      tone: 'danger',
+    });
+    if (!ok) return;
     const { error } = await supabase
       .from('staff_members')
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', person.staffMemberId);
     if (error) {
-      setMessage({ type: 'error', text: error.message });
+      toastError(error, 'Something went wrong.');
       return;
     }
-    setMessage({ type: 'success', text: 'Staff deactivated.' });
+    toastSuccess('Staff deactivated.');
     await loadData();
   };
 
   if (!isSuperAdmin) {
     return (
-      <div className="py-10 text-center">
-        <h1 className="text-2xl font-bold">Access denied</h1>
-        <p className="mt-2 text-muted-foreground">Only Super Admin can manage staff pay.</p>
-      </div>
+      <AccessDenied
+        title="Access denied"
+        message="Only Super Admin can manage staff pay."
+      />
     );
   }
 
@@ -513,18 +499,6 @@ export default function StaffPayPage() {
           </Button>
         </div>
       </div>
-
-      {message ? (
-        <div
-          className={`rounded-md border px-4 py-3 text-sm ${
-            message.type === 'success'
-              ? 'border-green-200 bg-green-50 text-green-800'
-              : 'border-destructive/30 bg-destructive/10 text-destructive'
-          }`}
-        >
-          {message.text}
-        </div>
-      ) : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Card>
