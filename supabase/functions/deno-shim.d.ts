@@ -13,6 +13,8 @@ declare namespace Deno {
 
 declare module 'https://esm.sh/@supabase/supabase-js@2.49.1' {
   // Minimal typing — runtime is Deno on Supabase, not the Vite TS project.
+  type AuthUser = { id: string; email?: string | null };
+
   export function createClient(
     supabaseUrl: string,
     supabaseKey: string,
@@ -20,15 +22,19 @@ declare module 'https://esm.sh/@supabase/supabase-js@2.49.1' {
   ): {
     auth: {
       getUser: (jwt?: string) => Promise<{
-        data: { user: { id: string; email?: string | null } | null };
+        data: { user: AuthUser | null };
         error: { message: string } | null;
       }>;
       admin: {
+        getUserById: (id: string) => Promise<{
+          data: { user: AuthUser | null };
+          error: { message: string } | null;
+        }>;
         updateUserById: (
           id: string,
           attributes: Record<string, unknown>,
         ) => Promise<{
-          data: { user: { id: string } | null };
+          data: { user: AuthUser | null };
           error: { message: string } | null;
         }>;
       };

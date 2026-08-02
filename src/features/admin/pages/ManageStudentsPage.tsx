@@ -1227,6 +1227,8 @@ export default function ManageStudentsPage() {
                 <label className="text-sm font-medium">New Password</label>
                 <Input
                   type="password"
+                  name="bq_student_new_password"
+                  autoComplete="new-password"
                   value={resetPassword}
                   onChange={(e) => setResetPassword(e.target.value)}
                   placeholder="Min 6 characters"
@@ -1236,6 +1238,8 @@ export default function ManageStudentsPage() {
                 <label className="text-sm font-medium">Confirm Password</label>
                 <Input
                   type="password"
+                  name="bq_student_confirm_password"
+                  autoComplete="new-password"
                   value={resetConfirm}
                   onChange={(e) => setResetConfirm(e.target.value)}
                   placeholder="Re-enter password"

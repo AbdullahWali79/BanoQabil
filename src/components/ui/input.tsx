@@ -3,9 +3,21 @@ import { Eye, EyeOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
-  ({ className, type, ...props }, ref) => {
+  ({ className, type, autoComplete, readOnly, onFocus, onBlur, ...props }, ref) => {
     const [showPassword, setShowPassword] = React.useState(false);
+    const [autofillUnlocked, setAutofillUnlocked] = React.useState(false);
     const isPassword = type === "password";
+
+    // Login uses current-password — allow browser save/fill there.
+    // Admin "set new password" fields must stay empty (Chrome injects strong passwords).
+    const allowBrowserAutofill =
+      autoComplete === "current-password" ||
+      autoComplete === "username" ||
+      autoComplete === "email";
+
+    const blockPasswordAutofill = isPassword && !allowBrowserAutofill;
+    const resolvedAutoComplete =
+      autoComplete ?? (isPassword ? "new-password" : undefined);
 
     return (
       <div className="relative w-full">
@@ -17,11 +29,25 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
             className
           )}
           ref={ref}
+          autoComplete={resolvedAutoComplete}
+          readOnly={readOnly ?? (blockPasswordAutofill && !autofillUnlocked)}
+          onFocus={(e) => {
+            if (blockPasswordAutofill) setAutofillUnlocked(true);
+            onFocus?.(e);
+          }}
+          onBlur={(e) => {
+            // Re-lock empty fields so reopening a modal does not get autofilled
+            if (blockPasswordAutofill && !e.currentTarget.value) {
+              setAutofillUnlocked(false);
+            }
+            onBlur?.(e);
+          }}
           {...props}
         />
         {isPassword && (
           <button
             type="button"
+            tabIndex={-1}
             onClick={(e) => {
               e.preventDefault();
               setShowPassword(!showPassword);

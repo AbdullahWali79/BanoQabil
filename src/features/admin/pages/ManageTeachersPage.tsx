@@ -488,7 +488,7 @@ export default function ManageTeachersPage() {
         if (!hasCourse || scope !== genderFilter) return false;
       }
 
-      return (
+  return (
         t.profiles?.full_name?.toLowerCase().includes(q) ||
         t.profiles?.email?.toLowerCase().includes(q) ||
         t.username?.toLowerCase().includes(q) ||
@@ -741,6 +741,10 @@ export default function ManageTeachersPage() {
 
   const handleResetPassword = async () => {
     if (!resetTarget) return;
+    if (!resetTarget.profiles.id) {
+      toastError('Teacher Auth account id is missing. Cannot reset password.');
+      return;
+    }
     if (resetPassword.length < 6) {
       toastError('New password must be at least 6 characters.');
       return;
@@ -752,8 +756,17 @@ export default function ManageTeachersPage() {
 
     setResetting(true);
     try {
-      await adminSetUserPassword(resetTarget.profiles.id, resetPassword);
-      toastSuccess('Password updated.');
+      const result = await adminSetUserPassword(resetTarget.profiles.id, resetPassword, {
+        hintEmail: resetTarget.profiles.email,
+      });
+      const loginEmail = result.loginEmail || resetTarget.profiles.email || 'their email';
+      toastSuccess(
+        result.emailSynced
+          ? `Password updated. Login with ${loginEmail} (Auth email was synced).`
+          : `Password updated. Teacher must login with email: ${loginEmail}`,
+      );
+      setResetPassword('');
+      setResetConfirm('');
       setResetTarget(null);
     } catch (err: unknown) {
       toastError(err, 'Password update failed.');
@@ -1438,7 +1451,7 @@ export default function ManageTeachersPage() {
           </Button>
           <Button className="gap-2" onClick={openAdd}>
             <Plus className="h-4 w-4" /> Add Teacher
-          </Button>
+        </Button>
         </div>
       </div>
 
@@ -1496,12 +1509,12 @@ export default function ManageTeachersPage() {
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative w-full max-w-sm">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
+              <Input 
                   placeholder="Search name, email, username, code..."
                   className="bg-background pl-9"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
               </div>
               <select
                 className="h-10 rounded-md border bg-background px-3 text-sm"
@@ -1519,7 +1532,7 @@ export default function ManageTeachersPage() {
               </p>
             </div>
           </div>
-
+          
           <div className="overflow-x-auto">
             <table className="w-full min-w-[820px] text-left text-sm">
               <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
@@ -1570,8 +1583,8 @@ export default function ManageTeachersPage() {
                         <td className="px-4 py-3">
                           <span className="font-mono text-xs font-semibold tabular-nums">
                             {t.trainer_code || '—'}
-                          </span>
-                        </td>
+                        </span>
+                      </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
@@ -1599,13 +1612,13 @@ export default function ManageTeachersPage() {
                             {courseName ? (
                               <span className="inline-flex max-w-[180px] truncate rounded bg-muted px-2 py-0.5 text-xs font-medium">
                                 {courseName}
-                              </span>
+                        </span>
                             ) : (
                               <span className="text-xs italic text-muted-foreground">Unassigned</span>
                             )}
                             {scopeBadge(scope, hasCourse)}
                           </div>
-                        </td>
+                      </td>
                         <td className="px-4 py-3">
                           <span
                             className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusBadgeClass(
@@ -1616,38 +1629,51 @@ export default function ManageTeachersPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <div className="inline-flex items-center gap-0.5 rounded-lg border bg-background p-0.5 shadow-sm">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              title="View details"
-                              onClick={() => setViewing(t)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              title="Edit"
-                              onClick={() => openEdit(t)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              title="Reset Password"
-                              disabled={!canResetPasswords}
-                              onClick={() => openResetPassword(t)}
-                            >
-                              <KeyRound className="h-4 w-4" />
-                            </Button>
+                          <div className="inline-flex flex-col items-stretch gap-1 rounded-lg border bg-background p-0.5 shadow-sm">
+                            <div className="flex items-center justify-center gap-0.5">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="View details"
+                                onClick={() => setViewing(t)}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="Edit"
+                                onClick={() => openEdit(t)}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="Reset Password"
+                                disabled={!canResetPasswords}
+                                onClick={() => openResetPassword(t)}
+                              >
+                                <KeyRound className="h-4 w-4" />
+                              </Button>
+                              {canDeleteTeacher ? (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive"
+                                  title="Delete teacher"
+                                  onClick={() => deleteTeacher(t)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              ) : null}
+                            </div>
                             {canChangeTeacherStatus ? (
                               <select
-                                className="h-8 max-w-[108px] rounded-md border-0 bg-transparent px-1 text-xs outline-none"
+                                className="h-8 w-full rounded-md border-0 bg-transparent px-1 text-center text-xs outline-none"
                                 value={t.profiles.status || 'Pending'}
                                 title="Change status"
                                 onChange={(e) =>
@@ -1663,20 +1689,9 @@ export default function ManageTeachersPage() {
                                 <option value="Rejected">Rejected</option>
                               </select>
                             ) : null}
-                            {canDeleteTeacher ? (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive"
-                                title="Delete teacher"
-                                onClick={() => deleteTeacher(t)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            ) : null}
                           </div>
-                        </td>
-                      </tr>
+                      </td>
+                    </tr>
                     );
                   })
                 )}
@@ -1807,7 +1822,7 @@ export default function ManageTeachersPage() {
                   <p className="text-sm text-muted-foreground mt-1">
                     Click ✨ Auto Generate to create a unique Trainer Code (used as password).
                   </p>
-                </div>
+              </div>
                 <Button variant="ghost" size="icon" onClick={() => setShowAddModal(false)}>
                   <X className="w-4 h-4" />
                 </Button>
@@ -1838,53 +1853,85 @@ export default function ManageTeachersPage() {
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md shadow-lg border-none">
             <CardContent className="p-6 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-xl font-bold">Reset Password</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    {resetTarget.profiles.full_name} · {resetTarget.profiles.email}
+                    {resetTarget.profiles.full_name}
+                    {resetTarget.profiles.email ? ` · ${resetTarget.profiles.email}` : ''}
                   </p>
-                  {resetTarget.trainer_code ? (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Trainer Code:{' '}
-                      <span className="font-mono font-medium text-foreground">
-                        {resetTarget.trainer_code}
-                      </span>
-                    </p>
-                  ) : null}
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => setResetTarget(null)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setResetTarget(null);
+                    setResetPassword('');
+                    setResetConfirm('');
+                  }}
+                >
                   <X className="w-4 h-4" />
                 </Button>
               </div>
 
-              <div className="space-y-2">
-                <FieldLabel required>New Password</FieldLabel>
-                <Input
-                  type="password"
-                  value={resetPassword}
-                  onChange={(e) => setResetPassword(e.target.value)}
-                  placeholder="Min 6 characters"
-                />
-              </div>
-              <div className="space-y-2">
-                <FieldLabel required>Confirm Password</FieldLabel>
-                <Input
-                  type="password"
-                  value={resetConfirm}
-                  onChange={(e) => setResetConfirm(e.target.value)}
-                  placeholder="Re-enter password"
-                />
-              </div>
+              <form
+                className="space-y-4"
+                autoComplete="off"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleResetPassword();
+                }}
+              >
+                <div className="space-y-2">
+                  <FieldLabel required>New Password</FieldLabel>
+                  <Input
+                    key={`np-${resetTarget.profiles.id}`}
+                    type="password"
+                    name="bq_teacher_new_password"
+                    autoComplete="new-password"
+                    value={resetPassword}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    placeholder="Min 6 characters"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <FieldLabel required>Confirm Password</FieldLabel>
+                  <Input
+                    key={`cp-${resetTarget.profiles.id}`}
+                    type="password"
+                    name="bq_teacher_confirm_password"
+                    autoComplete="new-password"
+                    value={resetConfirm}
+                    onChange={(e) => setResetConfirm(e.target.value)}
+                    placeholder="Re-enter password"
+                  />
+                </div>
 
-              <div className="flex flex-col gap-2 pt-2">
-                <Button onClick={handleResetPassword} disabled={resetting}>
-                  {resetting ? 'Updating...' : 'Set New Password'}
-                </Button>
-                <Button variant="ghost" onClick={() => setResetTarget(null)} disabled={resetting}>
-                  Cancel
-                </Button>
-              </div>
+                <div className="flex flex-col gap-2 pt-2">
+                  <Button
+                    type="submit"
+                    disabled={
+                      resetting ||
+                      resetPassword.length < 6 ||
+                      resetPassword !== resetConfirm
+                    }
+                  >
+                    {resetting ? 'Updating...' : 'Set New Password'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setResetTarget(null);
+                      setResetPassword('');
+                      setResetConfirm('');
+                    }}
+                    disabled={resetting}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
             </CardContent>
           </Card>
         </div>

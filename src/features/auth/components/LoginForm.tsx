@@ -73,7 +73,12 @@ export function LoginForm() {
               <FormItem>
                 <FormLabel>Email</FormLabel>
                 <FormControl>
-                  <Input placeholder="admin@banoqabil.com" type="email" {...field} />
+                  <Input
+                    placeholder="admin@banoqabil.com"
+                    type="email"
+                    autoComplete="email"
+                    {...field}
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -86,7 +91,12 @@ export function LoginForm() {
               <FormItem>
                 <FormLabel>Password</FormLabel>
                 <FormControl>
-                  <Input placeholder="••••••••" type="password" {...field} />
+                  <Input
+                    placeholder="••••••••"
+                    type="password"
+                    autoComplete="current-password"
+                    {...field}
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>

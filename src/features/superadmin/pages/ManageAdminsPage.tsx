@@ -814,6 +814,8 @@ export default function ManageAdminsPage() {
                 <label className="text-sm font-medium">New Password</label>
                 <Input
                   type="password"
+                  name="bq_admin_new_password"
+                  autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="Min 6 characters"
@@ -823,6 +825,8 @@ export default function ManageAdminsPage() {
                 <label className="text-sm font-medium">Confirm Password</label>
                 <Input
                   type="password"
+                  name="bq_admin_confirm_password"
+                  autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Re-enter password"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuthStore } from '@/store/authStore';
 import { Card, CardContent } from '@/components/ui/card';
@@ -15,6 +15,7 @@ import {
   Phone,
   Search,
   Users,
+  X,
 } from 'lucide-react';
 import {
   cleanBatchDisplayName,
@@ -76,10 +77,35 @@ type EnrichedStudent = Student & {
 
 function statusClass(status?: string | null) {
   const s = (status || '').toLowerCase();
-  if (s === 'approved') return 'bg-emerald-100 text-emerald-800';
-  if (s === 'pending') return 'bg-amber-100 text-amber-800';
-  if (s === 'suspended') return 'bg-red-100 text-red-800';
-  return 'bg-muted text-muted-foreground';
+  if (s === 'approved') return 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200';
+  if (s === 'pending') return 'bg-amber-50 text-amber-700 ring-1 ring-amber-200';
+  if (s === 'suspended') return 'bg-red-50 text-red-700 ring-1 ring-red-200';
+  return 'bg-muted text-muted-foreground ring-1 ring-border';
+}
+
+function initials(name?: string | null) {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase();
+}
+
+function Field({
+  label,
+  children,
+  className = '',
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`min-w-0 space-y-0.5 ${className}`}>
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <div className="text-sm font-medium leading-snug text-foreground break-words">{children}</div>
+    </div>
+  );
 }
 
 export default function MyClassPage() {
@@ -246,159 +272,188 @@ export default function MyClassPage() {
     if (!selected?.profile?.id) return;
     const params = new URLSearchParams({
       student: selected.profile.id,
-      mode: 'single',
+      mode: 'selected',
     });
     if (selected.application_id) params.set('q', selected.application_id);
     navigate(`/dashboard/notifications?${params.toString()}`);
   };
 
+  const selectClassName =
+    'h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
   return (
     <TeacherAssignmentGate courseName={courseName} genderScope={genderScope} loading={loading}>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">My Classes</h1>
-            <p className="mt-1 text-muted-foreground">
+      <div className="space-y-5">
+        {/* Header */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">My Classes</h1>
+            <p className="mt-1 truncate text-sm text-muted-foreground">
               {courseName
                 ? `${courseName}${genderScope ? ` · ${genderScope}` : ''}`
                 : 'Full student records for your class'}
             </p>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Showing <span className="font-semibold text-foreground">{filtered.length}</span> student
-            {filtered.length === 1 ? '' : 's'}
-            {filtered.length > PAGE_SIZE ? ` · page ${currentPage}/${totalPages}` : ''}
-          </p>
+          <div className="inline-flex shrink-0 items-center gap-2 rounded-full border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground">
+            <Users className="h-4 w-4" />
+            <span>
+              Showing{' '}
+              <span className="font-semibold text-foreground">{filtered.length}</span> student
+              {filtered.length === 1 ? '' : 's'}
+            </span>
+          </div>
         </div>
 
         {errorMessage ? (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {errorMessage}
           </div>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
-          {(['Female', 'Male', 'All'] as GenderTab[]).map((tab) => (
-            <Button
-              key={tab}
-              type="button"
-              variant={genderTab === tab ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => {
-                setGenderTab(tab);
-                setSelectedId(null);
-              }}
-            >
-              {tab}
-              {tab !== 'All' ? ` (${counts[tab]})` : ` (${students.length})`}
-            </Button>
-          ))}
-        </div>
+        {/* Filters */}
+        <Card className="border shadow-sm">
+          <CardContent className="space-y-4 p-4">
+            <div className="flex flex-wrap gap-2">
+              {(['Female', 'Male', 'All'] as GenderTab[]).map((tab) => (
+                <Button
+                  key={tab}
+                  type="button"
+                  variant={genderTab === tab ? 'default' : 'outline'}
+                  size="sm"
+                  className="rounded-full"
+                  onClick={() => {
+                    setGenderTab(tab);
+                    setSelectedId(null);
+                  }}
+                >
+                  {tab}
+                  {tab !== 'All' ? ` (${counts[tab]})` : ` (${students.length})`}
+                </Button>
+              ))}
+            </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder="Search name, email, phone, ID..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <select
-            className="h-10 rounded-md border bg-background px-3 text-sm"
-            value={courseFilter}
-            onChange={(e) => setCourseFilter(e.target.value)}
-          >
-            {courseOptions.map((c) => (
-              <option key={c} value={c}>
-                {c === 'All' ? 'All Courses' : c}
-              </option>
-            ))}
-          </select>
-          <select
-            className="h-10 rounded-md border bg-background px-3 text-sm"
-            value={batchFilter}
-            onChange={(e) => setBatchFilter(e.target.value)}
-          >
-            {batchOptions.map((b) => (
-              <option key={b} value={b}>
-                {b === 'All' ? 'All Batches' : b}
-              </option>
-            ))}
-          </select>
-          <select
-            className="h-10 rounded-md border bg-background px-3 text-sm"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="All">All Status</option>
-            <option value="Approved">Approved</option>
-            <option value="Pending">Pending</option>
-            <option value="Suspended">Suspended</option>
-          </select>
-        </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="relative sm:col-span-2 xl:col-span-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  placeholder="Search name, email, phone, ID..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <select
+                className={selectClassName}
+                value={courseFilter}
+                onChange={(e) => setCourseFilter(e.target.value)}
+              >
+                {courseOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c === 'All' ? 'All Courses' : c}
+                  </option>
+                ))}
+              </select>
+              <select
+                className={selectClassName}
+                value={batchFilter}
+                onChange={(e) => setBatchFilter(e.target.value)}
+              >
+                {batchOptions.map((b) => (
+                  <option key={b} value={b}>
+                    {b === 'All' ? 'All Batches' : b}
+                  </option>
+                ))}
+              </select>
+              <select
+                className={selectClassName}
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="All">All Status</option>
+                <option value="Approved">Approved</option>
+                <option value="Pending">Pending</option>
+                <option value="Suspended">Suspended</option>
+              </select>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,1fr)]">
-          <Card className="overflow-hidden">
+        {/* Table + detail */}
+        <div
+          className={`grid gap-5 ${
+            selected
+              ? 'xl:grid-cols-[minmax(0,1fr)_320px]'
+              : 'grid-cols-1'
+          }`}
+        >
+          <Card className="min-w-0 overflow-hidden border shadow-sm">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[920px] text-left text-sm">
-                  <thead className="border-b bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 z-[1] border-b bg-muted/60 text-[11px] uppercase tracking-wide text-muted-foreground backdrop-blur">
                     <tr>
-                      <th className="whitespace-nowrap px-3 py-3 font-semibold">SR#</th>
-                      <th className="whitespace-nowrap px-3 py-3 font-semibold">App ID</th>
-                      <th className="min-w-[9rem] px-3 py-3 font-semibold">Name</th>
-                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Phone</th>
-                      <th className="min-w-[8rem] px-3 py-3 font-semibold">Course</th>
-                      <th className="min-w-[8rem] px-3 py-3 font-semibold">Batch</th>
-                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Gender</th>
-                      <th className="whitespace-nowrap px-3 py-3 font-semibold">Status</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">SR#</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">App ID</th>
+                      <th className="min-w-[10rem] px-4 py-3 font-semibold">Name</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Phone</th>
+                      <th className="min-w-[8rem] px-4 py-3 font-semibold">Course</th>
+                      <th className="min-w-[8rem] px-4 py-3 font-semibold">Batch</th>
+                      <th className="whitespace-nowrap px-4 py-3 font-semibold">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {pageRows.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
-                          <Users className="mx-auto mb-2 h-10 w-10 opacity-30" />
-                          No students match these filters.
+                        <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                          <Users className="mx-auto mb-3 h-10 w-10 opacity-30" />
+                          <p className="font-medium text-foreground">No students found</p>
+                          <p className="mt-1 text-sm">Try another gender tab or clear filters.</p>
                         </td>
                       </tr>
                     ) : (
                       pageRows.map((s, index) => {
                         const sr = (currentPage - 1) * PAGE_SIZE + index + 1;
+                        const active = selectedId === s.id;
                         return (
                           <tr
                             key={s.id}
                             className={`cursor-pointer transition-colors ${
-                              selectedId === s.id ? 'bg-primary/10' : 'hover:bg-muted/40'
+                              active
+                                ? 'bg-primary/10 ring-1 ring-inset ring-primary/20'
+                                : 'hover:bg-muted/50'
                             }`}
                             onClick={() => setSelectedId(s.id)}
                           >
-                            <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
+                            <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                               {sr}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-3 font-mono text-xs">
+                            <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
                               {s.application_id || '—'}
                             </td>
-                            <td className="max-w-[12rem] truncate px-3 py-3 font-medium" title={s.profile?.full_name || undefined}>
+                            <td
+                              className="max-w-[14rem] truncate px-4 py-3 font-medium"
+                              title={s.profile?.full_name || undefined}
+                            >
                               {s.profile?.full_name || '—'}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                            <td className="whitespace-nowrap px-4 py-3 tabular-nums text-muted-foreground">
                               {s.profile?.phone || '—'}
                             </td>
-                            <td className="max-w-[10rem] truncate px-3 py-3 text-xs" title={s.courseLabel}>
+                            <td
+                              className="max-w-[11rem] truncate px-4 py-3 text-xs text-muted-foreground"
+                              title={s.courseLabel}
+                            >
                               {s.courseLabel}
                             </td>
-                            <td className="max-w-[11rem] truncate px-3 py-3 text-xs" title={s.batchLabel}>
+                            <td
+                              className="max-w-[12rem] truncate px-4 py-3 text-xs text-muted-foreground"
+                              title={s.batchLabel}
+                            >
                               {s.batchLabel}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-3 text-xs">
-                              {s.resolvedGender}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-3">
+                            <td className="whitespace-nowrap px-4 py-3">
                               <span
-                                className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-medium ${statusClass(
+                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${statusClass(
                                   s.profile?.status,
                                 )}`}
                               >
@@ -414,9 +469,9 @@ export default function MyClassPage() {
               </div>
 
               {filtered.length > PAGE_SIZE ? (
-                <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 border-t bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-muted-foreground">
-                    {(currentPage - 1) * PAGE_SIZE + 1}—
+                    {(currentPage - 1) * PAGE_SIZE + 1}–
                     {Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length}
                   </p>
                   <div className="flex items-center gap-2">
@@ -449,136 +504,165 @@ export default function MyClassPage() {
             </CardContent>
           </Card>
 
-          <Card className="xl:sticky xl:top-20 xl:self-start">
-            <CardContent className="space-y-4 p-5">
-              <h2 className="text-lg font-semibold">Student Record</h2>
-              {!selected ? (
-                <p className="text-sm text-muted-foreground">
-                  Click any student row to view full details and actions.
-                </p>
-              ) : (
-                <div className="space-y-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Full Name</p>
-                    <p className="text-base font-semibold">
-                      {selected.profile?.full_name || '—'}
-                    </p>
-                  </div>
+          {/* Detail panel — viewport height, sticky actions (no full-page scroll) */}
+          {selected ? (
+            <>
+              {/* Mobile backdrop */}
+              <button
+                type="button"
+                aria-label="Close student record"
+                className="fixed inset-0 z-40 bg-black/40 xl:hidden"
+                onClick={() => setSelectedId(null)}
+              />
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-muted-foreground">App ID</p>
-                      <div className="mt-0.5 flex items-center gap-1.5">
-                        <p className="font-mono text-xs">{selected.application_id || '—'}</p>
-                        {selected.application_id ? (
-                          <button
-                            type="button"
-                            onClick={copyAppId}
-                            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                            title="Copy App ID"
-                          >
-                            <Copy size={14} />
-                          </button>
-                        ) : null}
+              <Card
+                className="fixed inset-x-3 bottom-3 top-auto z-50 flex max-h-[min(85vh,640px)] flex-col border shadow-lg xl:sticky xl:inset-x-auto xl:bottom-auto xl:top-20 xl:z-auto xl:max-h-[calc(100vh-6rem)] xl:self-start xl:shadow-sm"
+              >
+                <CardContent className="flex min-h-0 flex-1 flex-col gap-0 p-0">
+                  {/* Header */}
+                  <div className="flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                        {initials(selected.profile?.full_name)}
                       </div>
-                      {copied ? (
-                        <p className="mt-1 text-[11px] text-emerald-600">Copied</p>
-                      ) : null}
+                      <div className="min-w-0">
+                        <h2 className="truncate text-sm font-semibold">
+                          {selected.profile?.full_name || 'Student Record'}
+                        </h2>
+                        <p className="text-[11px] text-muted-foreground">Student Record</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground">Gender</p>
-                      <p className="font-medium">{selected.resolvedGender}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Email</p>
-                      {selected.profile?.email ? (
-                        <a
-                          href={`mailto:${selected.profile.email}`}
-                          className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      title="Close"
+                      onClick={() => setSelectedId(null)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  {/* Scrollable fields only */}
+                  <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+                      <Field label="App ID">
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono text-xs">{selected.application_id || '—'}</span>
+                          {selected.application_id ? (
+                            <button
+                              type="button"
+                              onClick={copyAppId}
+                              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              title="Copy App ID"
+                            >
+                              <Copy size={13} />
+                            </button>
+                          ) : null}
+                        </div>
+                        {copied ? (
+                          <p className="text-[10px] font-normal text-emerald-600">Copied</p>
+                        ) : null}
+                      </Field>
+                      <Field label="Gender">{selected.resolvedGender}</Field>
+                      <Field label="Status">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${statusClass(
+                            selected.profile?.status,
+                          )}`}
                         >
-                          <Mail size={13} />
-                          {selected.profile.email}
-                        </a>
-                      ) : (
-                        <p>—</p>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Phone</p>
-                      {selected.profile?.phone ? (
-                        <a
-                          href={`tel:${selected.profile.phone}`}
-                          className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-                        >
-                          <Phone size={13} />
-                          {selected.profile.phone}
-                        </a>
-                      ) : (
-                        <p>—</p>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Father Name</p>
-                      <p>{selected.father_name || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Status</p>
-                      <span
-                        className={`mt-0.5 inline-flex rounded-md px-2 py-0.5 text-[11px] font-medium ${statusClass(
-                          selected.profile?.status,
-                        )}`}
-                      >
-                        {selected.profile?.status || '—'}
-                      </span>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Course</p>
-                      <p className="font-medium">{selected.courseLabel}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Batch</p>
-                      <p>{selected.batchLabel}</p>
-                    </div>
-                    <div className="col-span-2">
-                      <p className="text-muted-foreground">Enrollment</p>
-                      <p>{selected.enrollment_date || '—'}</p>
+                          {selected.profile?.status || '—'}
+                        </span>
+                      </Field>
+                      <Field label="Father Name">{selected.father_name || '—'}</Field>
+                      <Field label="Email" className="col-span-2">
+                        {selected.profile?.email ? (
+                          <a
+                            href={`mailto:${selected.profile.email}`}
+                            className="inline-flex max-w-full items-center gap-1.5 text-primary hover:underline"
+                          >
+                            <Mail size={13} className="shrink-0" />
+                            <span className="truncate">{selected.profile.email}</span>
+                          </a>
+                        ) : (
+                          '—'
+                        )}
+                      </Field>
+                      <Field label="Phone">
+                        {selected.profile?.phone ? (
+                          <a
+                            href={`tel:${selected.profile.phone}`}
+                            className="inline-flex items-center gap-1.5 text-primary hover:underline"
+                          >
+                            <Phone size={13} className="shrink-0" />
+                            {selected.profile.phone}
+                          </a>
+                        ) : (
+                          '—'
+                        )}
+                      </Field>
+                      <Field label="Enrollment">{selected.enrollment_date || '—'}</Field>
+                      <Field label="Course">{selected.courseLabel}</Field>
+                      <Field label="Batch">{selected.batchLabel}</Field>
+                      <Field label="Address" className="col-span-2">
+                        <span className="font-normal text-muted-foreground">
+                          {selected.profile?.address || '—'}
+                        </span>
+                      </Field>
                     </div>
                   </div>
 
-                  <div>
-                    <p className="text-muted-foreground">Address</p>
-                    <p>{selected.profile?.address || '—'}</p>
-                  </div>
-
-                  <div className="grid gap-2 border-t pt-3">
-                    <Button type="button" size="sm" variant="outline" onClick={openProgress}>
-                      <BarChart3 size={15} />
+                  {/* Actions always visible */}
+                  <div className="shrink-0 grid gap-1.5 border-t bg-background px-4 py-3">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 justify-start gap-2"
+                      onClick={openProgress}
+                    >
+                      <BarChart3 size={14} />
                       View Progress
                     </Button>
-                    <Button type="button" size="sm" variant="outline" onClick={openAttendance}>
-                      <CalendarCheck size={15} />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 justify-start gap-2"
+                      onClick={openAttendance}
+                    >
+                      <CalendarCheck size={14} />
                       Mark Attendance
                     </Button>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="h-8 justify-start gap-2"
                       onClick={openNotification}
                       disabled={!selected.profile?.id}
                     >
-                      <Bell size={15} />
+                      <Bell size={14} />
                       Send Notification
                     </Button>
-                    {!selected.profile?.id ? (
-                      <p className="text-xs text-muted-foreground">
-                        Notification unavailable — student profile id missing.
-                      </p>
-                    ) : null}
                   </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <Card className="hidden border border-dashed shadow-none xl:block xl:sticky xl:top-20 xl:self-start xl:max-h-[calc(100vh-6rem)]">
+              <CardContent className="flex flex-col items-center justify-center px-6 py-10 text-center">
+                <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-muted">
+                  <Users className="h-5 w-5 text-muted-foreground" />
                 </div>
-              )}
-            </CardContent>
-          </Card>
+                <p className="text-sm font-medium">No student selected</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Click a row to view the student record.
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </TeacherAssignmentGate>

@@ -7,13 +7,22 @@ type AdminSetBody = {
   userId: string;
   password?: string;
   email?: string;
+  /** Profile email shown in UI — used to sync Auth if mismatched */
+  hintEmail?: string;
+};
+
+export type AdminSetPasswordResult = {
+  ok: true;
+  userId?: string;
+  loginEmail?: string | null;
+  emailSynced?: boolean;
 };
 
 /**
  * Call Edge Function with explicit JWT (more reliable than functions.invoke).
  * Requires: supabase functions deploy admin-set-password
  */
-async function callAdminSetPassword(body: AdminSetBody) {
+async function callAdminSetPassword(body: AdminSetBody): Promise<AdminSetPasswordResult> {
   const {
     data: { session },
     error: sessionError,
@@ -44,7 +53,13 @@ async function callAdminSetPassword(body: AdminSetBody) {
     );
   }
 
-  let payload: { error?: string; ok?: boolean } | null = null;
+  let payload: {
+    error?: string;
+    ok?: boolean;
+    userId?: string;
+    loginEmail?: string | null;
+    emailSynced?: boolean;
+  } | null = null;
   const text = await res.text();
   try {
     payload = text ? JSON.parse(text) : null;
@@ -55,27 +70,47 @@ async function callAdminSetPassword(body: AdminSetBody) {
   if (!res.ok) {
     if (res.status === 404) {
       throw new Error(
-        'Password service is not available. Ask Super Admin to deploy admin-set-password.',
+        'Password service is not available. Ask Super Admin to deploy admin-set-password on Supabase.',
       );
     }
-    // Do not leak raw response bodies to the UI
     const safe =
-      typeof payload?.error === 'string' && payload.error.length < 180 && !/jwt|apikey|stack/i.test(payload.error)
+      typeof payload?.error === 'string' &&
+      payload.error.length < 180 &&
+      !/jwt|apikey|stack/i.test(payload.error)
         ? payload.error
         : `Password update failed (${res.status}). Please try again.`;
     throw new Error(safe);
   }
 
-  if (payload?.error) {
-    throw new Error(String(payload.error));
+  // Strict success — do not toast "updated" on empty/HTML 200 responses
+  if (!payload || payload.ok !== true) {
+    if (typeof payload?.error === 'string' && payload.error) {
+      throw new Error(payload.error);
+    }
+    throw new Error(
+      'Password service did not confirm the update. Redeploy admin-set-password on Supabase and try again.',
+    );
   }
 
-  return payload;
+  return {
+    ok: true,
+    userId: payload.userId,
+    loginEmail: payload.loginEmail ?? null,
+    emailSynced: Boolean(payload.emailSynced),
+  };
 }
 
 /** Admin sets/resets another user's password via Edge Function. */
-export async function adminSetUserPassword(userId: string, password: string) {
-  return callAdminSetPassword({ userId, password });
+export async function adminSetUserPassword(
+  userId: string,
+  password: string,
+  opts?: { hintEmail?: string | null },
+) {
+  return callAdminSetPassword({
+    userId,
+    password,
+    hintEmail: opts?.hintEmail?.trim() || undefined,
+  });
 }
 
 /** Admin updates another user's login email (Auth + profiles). */
