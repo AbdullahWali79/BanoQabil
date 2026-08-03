@@ -16,9 +16,18 @@ import {
   CheckCircle2,
   AlertCircle,
   Eye,
+  Layers,
 } from 'lucide-react';
+
 import { Card, CardContent } from '@/components/ui/card';
-import { ensureTeacherRow, relationOne, setTeacherCourseAssignment, type GenderScope } from '@/features/teacher/utils/teacherData';
+import {
+  cleanBatchDisplayName,
+  ensureTeacherRow,
+  relationOne,
+  setTeacherCourseAssignment,
+  type GenderScope,
+} from '@/features/teacher/utils/teacherData';
+
 import {
   adminSetUserPassword,
   adminSetUserEmail,
@@ -185,6 +194,102 @@ export default function ManageTeachersPage() {
   const [genderScope, setGenderScope] = useState<GenderScope | ''>('');
   const [teacherCourseMap, setTeacherCourseMap] = useState<Record<string, string[]>>({});
   const [teacherScopeMap, setTeacherScopeMap] = useState<Record<string, GenderScope | undefined>>({});
+
+  type BatchOption = {
+    id: string;
+    name: string;
+    course_id: string | null;
+    teacher_id: string | null;
+    timing: string | null;
+  };
+
+  const [courseBatches, setCourseBatches] = useState<BatchOption[]>([]);
+  const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+
+  const fetchBatchesForCourse = async (courseId: string, currentTeacherId?: string) => {
+    if (!courseId) {
+      setCourseBatches([]);
+      setSelectedBatchIds([]);
+      return;
+    }
+    setLoadingBatches(true);
+    try {
+      const { data, error } = await supabase
+        .from('batches')
+        .select('id, name, course_id, teacher_id, timing')
+        .eq('course_id', courseId)
+        .order('name');
+      if (!error && data) {
+        setCourseBatches(data as BatchOption[]);
+        if (currentTeacherId) {
+          const assigned = (data as BatchOption[])
+            .filter((b) => b.teacher_id === currentTeacherId)
+            .map((b) => b.id);
+          setSelectedBatchIds(assigned);
+        } else {
+          setSelectedBatchIds([]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load course batches', err);
+    } finally {
+      setLoadingBatches(false);
+    }
+  };
+
+  const handleSelectCourse = (courseId: string, teacherId?: string) => {
+    if (!courseId) {
+      setSelectedCourseIds([]);
+      setGenderScope('');
+      setCourseBatches([]);
+      setSelectedBatchIds([]);
+    } else {
+      setSelectedCourseIds([courseId]);
+      if (!genderScope) setGenderScope('Both');
+      void fetchBatchesForCourse(courseId, teacherId ?? editing?.id);
+    }
+  };
+
+  const toggleBatchSelection = (batchId: string) => {
+    setSelectedBatchIds((prev) =>
+      prev.includes(batchId) ? prev.filter((id) => id !== batchId) : [...prev, batchId]
+    );
+  };
+
+  const selectAllBatches = () => {
+    setSelectedBatchIds(courseBatches.map((b) => b.id));
+  };
+
+  const deselectAllBatches = () => {
+    setSelectedBatchIds([]);
+  };
+
+  const syncTeacherBatches = async (teacherId: string, courseId: string | null) => {
+    if (!courseId) {
+      await supabase.from('batches').update({ teacher_id: null }).eq('teacher_id', teacherId);
+      return;
+    }
+
+    if (selectedBatchIds.length > 0) {
+      await supabase
+        .from('batches')
+        .update({ teacher_id: teacherId })
+        .in('id', selectedBatchIds);
+    }
+
+    const unselectedIds = courseBatches
+      .filter((b) => !selectedBatchIds.includes(b.id) && b.teacher_id === teacherId)
+      .map((b) => b.id);
+
+    if (unselectedIds.length > 0) {
+      await supabase
+        .from('batches')
+        .update({ teacher_id: null })
+        .in('id', unselectedIds);
+    }
+  };
+
 
   const setField = (key: keyof TeacherForm, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -397,17 +502,14 @@ export default function ManageTeachersPage() {
             ? 'Pick one course, or No Course. Same course cannot be given twice for the same gender group.'
             : denyMessage('can_assign_teachers')}
         </p>
-        <div className="grid gap-2 sm:grid-cols-2 rounded-md border p-3 max-h-48 overflow-y-auto">
+        <div className="grid gap-2 sm:grid-cols-2 rounded-md border p-3 max-h-48 overflow-y-auto bg-background">
           <label className="flex items-center gap-2 text-sm cursor-pointer sm:col-span-2">
             <input
               type="radio"
               name="teacher-assigned-course"
               className="h-4 w-4"
               checked={selectedCourseIds.length === 0}
-              onChange={() => {
-                setSelectedCourseIds([]);
-                setGenderScope('');
-              }}
+              onChange={() => handleSelectCourse('')}
             />
             <span className="font-medium">No Course</span>
           </label>
@@ -421,7 +523,7 @@ export default function ManageTeachersPage() {
                   name="teacher-assigned-course"
                   className="h-4 w-4"
                   checked={selectedCourseIds[0] === course.id}
-                  onChange={() => setSelectedCourseIds([course.id])}
+                  onChange={() => handleSelectCourse(course.id)}
                 />
                 <span>{course.name}</span>
               </label>
@@ -434,7 +536,6 @@ export default function ManageTeachersPage() {
         <FieldLabel>Class Gender (who they teach)</FieldLabel>
         <p className="text-xs text-muted-foreground">
           Change anytime (Male ↔ Female ↔ Both). If not selected, teacher sees <strong>no students</strong>.
-          Overlaps auto-adjust other teachers when you confirm on save.
         </p>
         <div className="flex flex-wrap gap-2">
           <label
@@ -472,8 +573,102 @@ export default function ManageTeachersPage() {
           ))}
         </div>
       </div>
+
+      {/* Interactive Batches Selection Box */}
+      {selectedCourseIds[0] && (
+        <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50/50 via-background to-muted/20 p-4 space-y-3 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2.5">
+            <div className="flex items-center gap-2">
+              <Layers className="h-4 w-4 text-blue-600" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                Assigned Batches ({selectedBatchIds.length}/{courseBatches.length} Selected)
+              </span>
+            </div>
+            {courseBatches.length > 0 && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs border-blue-200 text-blue-700 hover:bg-blue-50"
+                  onClick={selectAllBatches}
+                >
+                  Select All
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs border-slate-200 text-slate-700 hover:bg-slate-50"
+                  onClick={deselectAllBatches}
+                >
+                  Deselect All
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {loadingBatches ? (
+            <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground justify-center">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-600" /> Loading course batches...
+            </div>
+          ) : courseBatches.length === 0 ? (
+            <p className="text-xs text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-200">
+              No batches found for this course. You can create batches in the <strong>Admin &gt; Courses &amp; Batches</strong> section.
+            </p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {courseBatches.map((b) => {
+                const isChecked = selectedBatchIds.includes(b.id);
+                const isOtherTeacher = b.teacher_id && b.teacher_id !== (editing?.id ?? '');
+                const cleanName = cleanBatchDisplayName(b.name);
+                const gender = b.name.toLowerCase().includes('female') ? 'Female' : b.name.toLowerCase().includes('male') ? 'Male' : 'Both';
+
+                return (
+                  <label
+                    key={b.id}
+                    className={`flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer transition-all ${
+                      isChecked
+                        ? 'border-blue-500 bg-blue-100/60 dark:bg-blue-950/40 shadow-sm ring-1 ring-blue-500/30'
+                        : 'bg-background hover:bg-muted/40 border-slate-200'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      checked={isChecked}
+                      onChange={() => toggleBatchSelection(b.id)}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-semibold text-xs text-foreground truncate">
+                          {cleanName}
+                        </span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                          {gender}
+                        </span>
+                      </div>
+                      {b.timing ? (
+                        <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                          ⏰ {b.timing}
+                        </p>
+                      ) : null}
+                      {isOtherTeacher ? (
+                        <p className="text-[10px] text-amber-700 font-medium mt-1">
+                          ⚠️ Assigned to another trainer
+                        </p>
+                      ) : null}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
+
 
   const filteredTeachers = useMemo(() => {
     const q = search.toLowerCase();
@@ -680,6 +875,8 @@ export default function ManageTeachersPage() {
     setEditing(null);
     setSelectedCourseIds([]);
     setGenderScope('');
+    setCourseBatches([]);
+    setSelectedBatchIds([]);
     setTrainerCodeCheck({ status: 'idle', message: '' });
     setUsernameCheck({ status: 'idle', message: '' });
     setShowAddModal(true);
@@ -705,29 +902,41 @@ export default function ManageTeachersPage() {
       password: '',
       confirmPassword: '',
     });
-    setSelectedCourseIds(teacherCourseMap[teacher.id] ?? []);
-    setGenderScope(teacherScopeMap[teacher.id] || (teacherCourseMap[teacher.id]?.[0] ? 'Both' : ''));
     setShowAddModal(false);
 
     const withScope = await supabase
       .from('teacher_courses')
       .select('course_id, gender_scope')
       .eq('teacher_id', teacher.id);
+
+    let assignedCourseId: string | null = null;
     if (withScope.error) {
       const { data } = await supabase
         .from('teacher_courses')
         .select('course_id')
         .eq('teacher_id', teacher.id);
-      setSelectedCourseIds((data ?? []).map((r) => r.course_id));
-      setGenderScope((data ?? []).length ? 'Both' : '');
+      const cIds = (data ?? []).map((r) => r.course_id);
+      setSelectedCourseIds(cIds);
+      setGenderScope(cIds.length ? 'Both' : '');
+      assignedCourseId = cIds[0] || null;
     } else {
-      setSelectedCourseIds((withScope.data ?? []).map((r) => r.course_id));
+      const cIds = (withScope.data ?? []).map((r) => r.course_id);
+      setSelectedCourseIds(cIds);
       const scope = withScope.data?.[0]?.gender_scope;
       setGenderScope(
         scope === 'Male' || scope === 'Female' || scope === 'Both' ? scope : '',
       );
+      assignedCourseId = cIds[0] || null;
+    }
+
+    if (assignedCourseId) {
+      void fetchBatchesForCourse(assignedCourseId, teacher.id);
+    } else {
+      setCourseBatches([]);
+      setSelectedBatchIds([]);
     }
   };
+
 
   const openResetPassword = (teacher: TeacherRow) => {
     if (!canResetPasswords) {
@@ -854,11 +1063,13 @@ export default function ManageTeachersPage() {
 
     try {
       await applyCourseAssignment(editing.id);
+      await syncTeacherBatches(editing.id, selectedCourseIds[0] || null);
     } catch (err: unknown) {
       toastError(err, 'Course assignment failed.');
       setSaving(false);
       return;
     }
+
 
     toastSuccess('Teacher updated.');
     setEditing(null);
@@ -1022,7 +1233,9 @@ export default function ManageTeachersPage() {
 
       if (teacherId) {
         await applyCourseAssignment(teacherId);
+        await syncTeacherBatches(teacherId, selectedCourseIds[0] || null);
       }
+
 
       toastSuccess(
         canChangeTeacherStatus ? 'Teacher added.' : 'Teacher added (pending approval).',
@@ -1788,28 +2001,53 @@ export default function ManageTeachersPage() {
 
       {/* Edit Modal */}
       {editing && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-3xl shadow-lg border-none max-h-[90vh] overflow-y-auto">
-            <CardContent className="p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold">Edit Teacher</h2>
-                <Button variant="ghost" size="icon" onClick={() => setEditing(null)}>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <Card className="w-full max-w-3xl border-2 border-blue-500/20 shadow-2xl bg-card max-h-[90vh] overflow-y-auto">
+            <CardContent className="p-6 space-y-5">
+              <div className="flex items-center justify-between border-b pb-3.5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white font-bold shadow-md">
+                    {editing.profiles.full_name ? editing.profiles.full_name.charAt(0).toUpperCase() : 'T'}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold text-foreground">Edit Teacher Profile</h2>
+                      {editing.trainer_code ? (
+                        <span className="rounded-md bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 text-xs font-mono font-bold text-blue-700 dark:text-blue-300">
+                          #{editing.trainer_code}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Update contact details, locations, course assignment, and specific batches.
+                    </p>
+                  </div>
+                </div>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditing(null)}>
                   <X className="w-4 h-4" />
                 </Button>
               </div>
+
               {renderFormFields('edit')}
-              <div className="flex justify-end gap-3 pt-2">
-                <Button variant="outline" onClick={() => setEditing(null)}>
-                  Cancel
-                </Button>
-                <Button onClick={saveEdit} disabled={saving}>
-                  {saving ? 'Saving...' : 'Save Changes'}
-                </Button>
+
+              <div className="flex items-center justify-between border-t pt-4">
+                <span className="text-xs text-muted-foreground italic">
+                  Changes take effect immediately upon saving.
+                </span>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" onClick={() => setEditing(null)}>
+                    Cancel
+                  </Button>
+                  <Button type="button" onClick={saveEdit} disabled={saving} className="bg-blue-600 hover:bg-blue-700">
+                    {saving ? 'Saving...' : 'Save Changes'}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
         </div>
       )}
+
 
       {/* Add Modal */}
       {showAddModal && (

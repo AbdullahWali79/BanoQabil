@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   CalendarCheck,
   Check,
+  Layers,
   Loader2,
   Save,
   Search,
@@ -18,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  cleanBatchDisplayName,
   getTeacherAssignedCourse,
   getTeacherBatches,
   getTeacherEntityId,
@@ -27,6 +29,7 @@ import {
   type GenderScope,
 } from '@/features/teacher/utils/teacherData';
 import { TeacherAssignmentGate } from '@/features/teacher/components/TeacherAssignmentGate';
+
 
 type Student = {
   id: string;
@@ -107,6 +110,9 @@ export default function TeacherAttendancePage() {
   const { user } = useAuthStore();
   const [searchParams] = useSearchParams();
   const [students, setStudents] = useState<Student[]>([]);
+  const [teacherBatches, setTeacherBatches] = useState<{ id: string; name?: string | null; timing?: string | null }[]>([]);
+
+  const [selectedBatchId, setSelectedBatchId] = useState<string>('all');
   const [teacherId, setTeacherId] = useState<string | null>(null);
   const [date, setDate] = useState(todayISO);
   const [marks, setMarks] = useState<Record<string, Status>>({});
@@ -137,6 +143,9 @@ export default function TeacherAttendancePage() {
       const assigned = await getTeacherAssignedCourse(user.id);
       setCourseName(assigned?.name ?? null);
       setGenderScope(assigned?.genderScope ?? null);
+
+      const bList = await getTeacherBatches(user.id);
+      setTeacherBatches(bList);
 
       const entityId = await getTeacherEntityId(user.id);
       setTeacherId(entityId);
@@ -197,15 +206,32 @@ export default function TeacherAttendancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, date]);
 
+  const batchFilteredStudents = useMemo(() => {
+    if (selectedBatchId === 'all') return students;
+    return students.filter((s) => s.batch_id === selectedBatchId);
+  }, [students, selectedBatchId]);
+
   const genderStudents = useMemo(() => {
-    return students.filter((s) => {
+    return batchFilteredStudents.filter((s) => {
       const g = resolveStudentGender({
         gender: s.gender,
         batchName: relationOne(s.batches)?.name,
       });
       return g === genderTab;
     });
-  }, [students, genderTab]);
+  }, [batchFilteredStudents, genderTab]);
+
+  const batchStudentCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const b of teacherBatches) map[b.id] = 0;
+    for (const s of students) {
+      if (s.batch_id && map[s.batch_id] !== undefined) {
+        map[s.batch_id] += 1;
+      }
+    }
+    return map;
+  }, [students, teacherBatches]);
+
 
   const isFocusedStudent = (s: Student) => {
     const q = focusQuery.toLowerCase().trim();
@@ -240,7 +266,7 @@ export default function TeacherAttendancePage() {
   const counts = useMemo(() => {
     let female = 0;
     let male = 0;
-    for (const s of students) {
+    for (const s of batchFilteredStudents) {
       const g = resolveStudentGender({
         gender: s.gender,
         batchName: relationOne(s.batches)?.name,
@@ -249,7 +275,8 @@ export default function TeacherAttendancePage() {
       if (g === 'Male') male += 1;
     }
     return { Female: female, Male: male };
-  }, [students]);
+  }, [batchFilteredStudents]);
+
 
   const summary = useMemo(() => {
     const values = genderStudents.map((s) => marks[s.id] || 'Present');
@@ -301,7 +328,10 @@ export default function TeacherAttendancePage() {
       });
       if (error) throw error;
 
-      toastSuccess(`${genderTab} attendance saved for ${formatDisplayDate(date)}.`);
+      const selectedBatchObj = teacherBatches.find((b) => b.id === selectedBatchId);
+      const batchTag = selectedBatchObj ? ` (${cleanBatchDisplayName(selectedBatchObj.name)})` : '';
+      toastSuccess(`${genderTab} attendance saved${batchTag} for ${formatDisplayDate(date)}.`);
+
       await load();
     } catch (err: unknown) {
       toastError(err, 'Save failed.');
@@ -316,7 +346,8 @@ export default function TeacherAttendancePage() {
 
   return (
     <TeacherAssignmentGate courseName={courseName} genderScope={genderScope} loading={loading}>
-      <div className="space-y-5 pb-24">
+      <div className="space-y-5 pb-6">
+
         {/* Header */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
@@ -433,60 +464,131 @@ export default function TeacherAttendancePage() {
 
         {/* Toolbar */}
         <Card className="border shadow-sm">
-          <CardContent className="space-y-3 p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap gap-2">
-                {(['Female', 'Male'] as GenderTab[]).map((tab) => (
+          <CardContent className="space-y-4 p-4">
+            {/* Batch Selector Filter */}
+            {teacherBatches.length > 0 && (
+              <div className="space-y-3 border-b pb-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Layers className="h-4 w-4 text-blue-600" /> Select Batch For Attendance
+                  </label>
+
+                  {/* Active Batch Info Badge */}
+                  {selectedBatchId !== 'all' && (
+                    (() => {
+                      const activeBatch = teacherBatches.find((b) => b.id === selectedBatchId);
+                      return activeBatch ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1 text-xs font-medium text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          <span className="font-bold">{cleanBatchDisplayName(activeBatch.name)}</span>
+                          {activeBatch.timing ? <span className="opacity-80">· ⏰ {activeBatch.timing}</span> : null}
+                        </span>
+                      ) : null;
+                    })()
+                  )}
+                </div>
+
+                {/* Compact Batch Pills */}
+                <div className="flex flex-wrap gap-2">
                   <Button
-                    key={tab}
                     type="button"
-                    variant={genderTab === tab ? 'default' : 'outline'}
+                    variant={selectedBatchId === 'all' ? 'default' : 'outline'}
                     size="sm"
-                    className="rounded-full"
-                    onClick={() => setGenderTab(tab)}
+                    className={`rounded-lg font-medium transition-all ${
+                      selectedBatchId === 'all' ? 'bg-blue-600 hover:bg-blue-700 shadow-sm' : ''
+                    }`}
+                    onClick={() => setSelectedBatchId('all')}
                   >
-                    {tab} ({counts[tab]})
+                    All Batches ({students.length})
                   </Button>
-                ))}
+
+                  {teacherBatches.map((b) => {
+                    const isSelected = selectedBatchId === b.id;
+                    const count = batchStudentCounts[b.id] || 0;
+                    const displayName = cleanBatchDisplayName(b.name);
+                    return (
+                      <Button
+                        key={b.id}
+                        type="button"
+                        variant={isSelected ? 'default' : 'outline'}
+                        size="sm"
+                        className={`rounded-lg font-medium transition-all ${
+                          isSelected ? 'bg-blue-600 hover:bg-blue-700 shadow-sm' : ''
+                        }`}
+                        onClick={() => {
+                          setSelectedBatchId(b.id);
+                          const g = resolveStudentGender({ batchName: b.name });
+                          if (g === 'Female' || g === 'Male') setGenderTab(g);
+                        }}
+                      >
+                        {displayName} ({count})
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Filter & Search Bar */}
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Gender Segmented Control */}
+                <div className="flex rounded-lg border bg-muted/40 p-1">
+                  {(['Female', 'Male'] as GenderTab[]).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setGenderTab(tab)}
+                      className={`rounded-md px-3 py-1 text-xs font-semibold transition-all ${
+                        genderTab === tab
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {tab} ({counts[tab]})
+                    </button>
+                  ))}
+                </div>
+
+                {/* Quick Mark Buttons */}
+                <div className="flex items-center gap-1.5 border-l pl-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mr-1">
+                    Quick:
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1 border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs"
+                    onClick={() => markAllVisible('Present')}
+                    disabled={!genderStudents.length}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    All Present
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1 border-red-200 text-red-700 hover:bg-red-50 text-xs"
+                    onClick={() => markAllVisible('Absent')}
+                    disabled={!genderStudents.length}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    All Absent
+                  </Button>
+                </div>
               </div>
 
-              <div className="relative w-full lg:max-w-xs">
+              {/* Search Box */}
+              <div className="relative w-full md:w-64">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  className="pl-9"
+                  className="h-9 pl-9 text-xs"
                   placeholder="Search name, email, App ID…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Quick mark
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                onClick={() => markAllVisible('Present')}
-                disabled={!genderStudents.length}
-              >
-                <Check className="h-3.5 w-3.5" />
-                All Present
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1.5 border-red-200 text-red-700 hover:bg-red-50"
-                onClick={() => markAllVisible('Absent')}
-                disabled={!genderStudents.length}
-              >
-                <X className="h-3.5 w-3.5" />
-                All Absent
-              </Button>
             </div>
 
             {focusQuery ? (
@@ -497,7 +599,7 @@ export default function TeacherAttendancePage() {
                 </span>
                 <button
                   type="button"
-                  className="text-primary hover:underline"
+                  className="text-primary hover:underline text-xs"
                   onClick={() => setFocusQuery('')}
                 >
                   Clear
@@ -506,6 +608,7 @@ export default function TeacherAttendancePage() {
             ) : null}
           </CardContent>
         </Card>
+
 
         {/* Roster table */}
         <Card className="overflow-hidden border shadow-sm">
@@ -622,34 +725,76 @@ export default function TeacherAttendancePage() {
           </CardContent>
         </Card>
 
-        {/* Sticky save bar */}
+        {/* Save Bar at Bottom of Page */}
         {genderStudents.length > 0 ? (
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
-              <div className="text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">{genderTab}</span>
-                {' · '}
-                <span className="text-emerald-700">Present {summary.present}</span>
-                {' · '}
-                <span className="text-red-700">Absent {summary.absent}</span>
-                {isDirty ? (
-                  <span className="ml-2 text-orange-600">· Unsaved</span>
-                ) : (
-                  <span className="ml-2 text-emerald-600">· Saved</span>
-                )}
+          <Card className="border shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600/10 text-blue-600">
+                    <CalendarCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="font-bold text-foreground">
+                        {selectedBatchId !== 'all'
+                          ? (teacherBatches.find((b) => b.id === selectedBatchId)?.name
+                              ? cleanBatchDisplayName(teacherBatches.find((b) => b.id === selectedBatchId)!.name!)
+                              : genderTab)
+                          : `${genderTab} Class (All Batches)`}
+                      </span>
+                      {isDirty ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300 border border-amber-300">
+                          ● Unsaved Changes
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-950 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 border border-emerald-300">
+                          ✓ All Saved
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      <span className="font-semibold text-emerald-600">{summary.present} Present</span>
+                      {' · '}
+                      <span className="font-semibold text-red-600">{summary.absent} Absent</span>
+                      {' · '}
+                      <span>{summary.total} Total</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={saveAttendance}
+                    disabled={saving || loading}
+                    className={`gap-2 shadow-sm transition-all ${
+                      isDirty
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    }`}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isDirty ? (
+                      <Save className="h-4 w-4" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                    {saving
+                      ? 'Saving...'
+                      : isDirty
+                      ? `Save ${genderTab} Attendance`
+                      : `Saved (${genderTab})`}
+                  </Button>
+                </div>
               </div>
-              <Button
-                onClick={saveAttendance}
-                disabled={saving || loading || !isDirty}
-                className="gap-2"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {saving ? 'Saving…' : `Save ${genderTab} Attendance`}
-              </Button>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         ) : null}
+
+
       </div>
     </TeacherAssignmentGate>
   );
 }
+

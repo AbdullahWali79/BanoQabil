@@ -273,19 +273,84 @@ export async function getTeacherAssignedCourse(
     data = withScope.data;
   }
 
-  if (error || !data?.[0]) return null;
+  if (!error && data?.[0]) {
+    const course = relationOne<{ id: string; name: string; description?: string | null }>(
+      data[0].courses,
+    );
+    if (course?.id) {
+      return {
+        id: course.id,
+        name: course.name,
+        description: null,
+        genderScope: parseGenderScope(data[0].gender_scope),
+      };
+    }
+  }
 
-  const course = relationOne<{ id: string; name: string; description?: string | null }>(
-    data[0].courses,
-  );
-  if (!course?.id) return null;
-  return {
-    id: course.id,
-    name: course.name,
-    description: null,
-    genderScope: parseGenderScope(data[0].gender_scope),
-  };
+  // Fallback: Infer course from assigned batches in 'batches' table
+  const teacherKeys = [authUserId, teacherEntityId].filter(Boolean) as string[];
+  const { data: batchData } = await supabase
+    .from('batches')
+    .select('course_id, name, courses(id, name, description)')
+    .in('teacher_id', teacherKeys)
+    .not('course_id', 'is', null);
+
+  if (batchData && batchData.length > 0) {
+    const firstCourse = relationOne<{ id: string; name: string; description?: string | null }>(
+      batchData[0].courses,
+    );
+
+    if (firstCourse?.id) {
+      // Determine overall gender scope from assigned batch names
+      let hasFemale = false;
+      let hasMale = false;
+      for (const b of batchData) {
+        const bName = cleanBatchDisplayName(b.name).toLowerCase();
+        if (/\bfemale\b/.test(bName)) hasFemale = true;
+        else if (/\bmale\b/.test(bName)) hasMale = true;
+        else {
+          hasFemale = true;
+          hasMale = true;
+        }
+      }
+      const derivedScope: GenderScope =
+        hasFemale && hasMale ? 'Both' : hasFemale ? 'Female' : hasMale ? 'Male' : 'Both';
+
+      return {
+        id: firstCourse.id,
+        name: firstCourse.name,
+        description: firstCourse.description || null,
+        genderScope: derivedScope,
+      };
+    }
+  }
+
+  return null;
 }
+
+/** Sync teacher_courses entry when assigning a teacher to a batch. */
+export async function syncTeacherBatchAssignment(teacherId: string | null, courseId: string) {
+  if (!teacherId || !courseId) return;
+  try {
+    const { data } = await supabase
+      .from('teacher_courses')
+      .select('id')
+      .eq('teacher_id', teacherId)
+      .eq('course_id', courseId)
+      .limit(1);
+
+    if (!data || data.length === 0) {
+      await supabase.from('teacher_courses').insert({
+        teacher_id: teacherId,
+        course_id: courseId,
+        gender_scope: 'Both',
+      });
+    }
+  } catch (err) {
+    console.warn('Sync teacher_courses notice:', err);
+  }
+}
+
 
 /**
  * Students visible to a teacher:
